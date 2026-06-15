@@ -289,6 +289,9 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
+    /// Per-workspace accent colors, keyed by absolute workspace cwd.
+    /// Values are curated swatch names or hex (e.g. "blue", "#89b4fa").
+    pub workspace_colors: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -1650,5 +1653,26 @@ scrollback_lines = 12345
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.advanced.scrollback_limit_bytes, 12345);
+    }
+
+    #[test]
+    fn workspace_colors_default_empty_and_parse() {
+        let default_config = Config::default();
+        assert!(default_config.workspace_colors.is_empty());
+
+        let toml = r##"
+[workspace_colors]
+"/home/me/proj" = "blue"
+"/home/me/api" = "#89b4fa"
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.workspace_colors.get("/home/me/proj").map(String::as_str),
+            Some("blue")
+        );
+        assert_eq!(
+            config.workspace_colors.get("/home/me/api").map(String::as_str),
+            Some("#89b4fa")
+        );
     }
 }
