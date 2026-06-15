@@ -103,6 +103,7 @@ impl App {
                     handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
                 }
                 Mode::Terminal => unreachable!(),
+                Mode::ChooseWorkspaceColor => {}
             },
         }
     }

@@ -645,6 +645,9 @@ impl App {
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
+            workspace_colors: std::collections::HashMap::new(),
+            color_picker: None,
+            request_workspace_color_save: None,
         };
 
         state.terminals = restored_terminals;
@@ -1664,6 +1667,9 @@ impl App {
             }
             Mode::Terminal => {
                 // Should not be called in terminal mode.
+            }
+            Mode::ChooseWorkspaceColor => {
+                // Handled in later tasks.
             }
         }
     }

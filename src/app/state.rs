@@ -756,6 +756,8 @@ pub enum Mode {
     RenameWorkspace,
     RenameTab,
     RenamePane,
+    #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
+    ChooseWorkspaceColor,
     NewLinkedWorktree,
     OpenExistingWorktree,
     ConfirmRemoveWorktree,
@@ -997,6 +999,76 @@ pub struct SettingsState {
     pub original_palette: Option<Palette>,
     /// The theme name before opening settings.
     pub original_theme: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Workspace accent color picker
+// ---------------------------------------------------------------------------
+
+/// Which choice is active in the workspace color picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
+pub enum ColorPickerSelection {
+    /// Clear the color.
+    Clear,
+    /// A curated swatch by index into `ColorPickerState::swatches`.
+    Swatch(usize),
+    /// The custom hex input field.
+    Custom,
+}
+
+/// State for the workspace color picker modal.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
+pub struct ColorPickerState {
+    pub ws_idx: usize,
+    /// (name, color) curated swatches, in display order.
+    pub swatches: Vec<(String, Color)>,
+    pub selected: ColorPickerSelection,
+    pub hex_input: String,
+    pub error: Option<String>,
+}
+
+impl ColorPickerState {
+    /// Resolve the current selection to a config value:
+    /// `Ok(None)` clears, `Ok(Some(v))` sets, `Err` is an invalid custom hex.
+    #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
+    pub fn resolved_value(&self) -> Result<Option<String>, String> {
+        match self.selected {
+            ColorPickerSelection::Clear => Ok(None),
+            ColorPickerSelection::Swatch(i) => Ok(self.swatches.get(i).map(|(n, _)| n.clone())),
+            ColorPickerSelection::Custom => {
+                let hex = self.hex_input.trim();
+                match crate::config::try_parse_color(hex) {
+                    Some(_) => Ok(Some(hex.to_string())),
+                    None => Err("invalid color".to_string()),
+                }
+            }
+        }
+    }
+}
+
+/// Curated accent swatches drawn from the active palette.
+#[allow(dead_code)] // consumed by the color picker open/render tasks; allow until then.
+pub fn workspace_color_swatches(palette: &Palette) -> Vec<(String, Color)> {
+    vec![
+        ("red".to_string(), palette.red),
+        ("peach".to_string(), palette.peach),
+        ("yellow".to_string(), palette.yellow),
+        ("green".to_string(), palette.green),
+        ("teal".to_string(), palette.teal),
+        ("blue".to_string(), palette.blue),
+        ("mauve".to_string(), palette.mauve),
+    ]
+}
+
+/// Pending request to persist a workspace color, drained by the App loop.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // consumed by the color save/persist task; allow until then.
+pub struct WorkspaceColorSaveRequest {
+    pub cwd: std::path::PathBuf,
+    /// `None` clears the color; `Some(v)` writes it.
+    pub value: Option<String>,
 }
 
 pub(crate) enum DragTarget {
@@ -1422,6 +1494,15 @@ pub struct AppState {
     pub(crate) plugin_command_logs: Vec<crate::api::schema::PluginCommandLogInfo>,
     pub(crate) next_plugin_command_log_id: u64,
     pub(crate) plugin_commands_in_flight: usize,
+    /// Runtime per-workspace accent colors, keyed by identity_cwd → config value.
+    #[allow(dead_code)] // consumed by the color load/render tasks; allow until then.
+    pub workspace_colors: std::collections::HashMap<std::path::PathBuf, String>,
+    /// Active workspace color picker, when in `Mode::ChooseWorkspaceColor`.
+    #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
+    pub color_picker: Option<ColorPickerState>,
+    /// Pending color-save request for the App loop to persist.
+    #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
+    pub request_workspace_color_save: Option<WorkspaceColorSaveRequest>,
     /// Highlight state for the bottom-right global launcher menu.
     pub global_menu: MenuListState,
     /// Resolved host terminal default colors for theming embedded panes.
@@ -1444,6 +1525,24 @@ impl AppState {
 
     pub fn sound_enabled(&self) -> bool {
         self.sound.enabled
+    }
+
+    /// Resolve a workspace's accent color from the runtime map, if valid.
+    ///
+    /// Curated swatch names (e.g. "blue", "mauve") resolve against the active
+    /// palette so they stay theme-accurate and match what the picker shows.
+    /// Everything else (hex like "#89b4fa", standard names) parses directly.
+    #[allow(dead_code)] // consumed by the accent bar render task; allow until then.
+    pub fn workspace_accent_color(&self, ws_idx: usize) -> Option<Color> {
+        let ws = self.workspaces.get(ws_idx)?;
+        let raw = self.workspace_colors.get(&ws.identity_cwd)?;
+        if let Some((_, color)) = workspace_color_swatches(&self.palette)
+            .into_iter()
+            .find(|(name, _)| name == raw)
+        {
+            return Some(color);
+        }
+        crate::config::try_parse_color(raw)
     }
 
     pub fn toast_delivery(&self) -> ToastDelivery {
@@ -1775,6 +1874,9 @@ impl AppState {
             host_terminal_theme: TerminalTheme::default(),
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
+            workspace_colors: std::collections::HashMap::new(),
+            color_picker: None,
+            request_workspace_color_save: None,
         }
     }
 
@@ -2263,5 +2365,55 @@ mod tests {
                 "Collapse"
             ]
         );
+    }
+
+    #[test]
+    fn workspace_accent_color_resolves_swatch_name_to_palette() {
+        let mut state = AppState::test_new();
+        let ws = crate::workspace::Workspace::test_new("test");
+        state.workspaces.push(ws);
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        // A curated swatch name resolves to the active palette's themed color,
+        // not the base ratatui color — including palette-only names like mauve.
+        state.workspace_colors.insert(cwd.clone(), "blue".to_string());
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.blue));
+        state.workspace_colors.insert(cwd, "mauve".to_string());
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.mauve));
+    }
+
+    #[test]
+    fn workspace_accent_color_resolves_custom_hex() {
+        let mut state = AppState::test_new();
+        let ws = crate::workspace::Workspace::test_new("test");
+        state.workspaces.push(ws);
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        state.workspace_colors.insert(cwd, "#abcdef".to_string());
+        assert_eq!(
+            state.workspace_accent_color(0),
+            Some(ratatui::style::Color::Rgb(0xab, 0xcd, 0xef))
+        );
+    }
+
+    #[test]
+    fn workspace_accent_color_none_when_unset_or_invalid() {
+        let mut state = AppState::test_new();
+        let ws = crate::workspace::Workspace::test_new("test");
+        state.workspaces.push(ws);
+        assert_eq!(state.workspace_accent_color(0), None);
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        state.workspace_colors.insert(cwd, "garbage".to_string());
+        assert_eq!(state.workspace_accent_color(0), None);
+    }
+
+    #[test]
+    fn workspace_color_swatches_uses_palette() {
+        let palette = Palette::from_name("catppuccin").unwrap();
+        let swatches = workspace_color_swatches(&palette);
+        let names: Vec<&str> = swatches.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["red", "peach", "yellow", "green", "teal", "blue", "mauve"]
+        );
+        assert_eq!(swatches[5].1, palette.blue);
     }
 }
