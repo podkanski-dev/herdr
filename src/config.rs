@@ -26,6 +26,9 @@ pub use self::{
     sound::SoundConfig,
     theme::{parse_color, CustomThemeColors, ThemeConfig},
 };
+// try_parse_color is consumed by the workspace color picker (later tasks); allow until then.
+#[allow(unused_imports)]
+pub use theme::try_parse_color;
 
 pub(crate) use self::io::upsert_top_level_bool;
 pub(crate) use self::keybinds::parse_key_combo;
