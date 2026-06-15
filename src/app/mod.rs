@@ -223,6 +223,28 @@ fn agent_panel_sort_from_config(
     }
 }
 
+/// Build the runtime workspace-color map from config, dropping unparseable
+/// entries. Returns the map and a list of diagnostics for skipped entries.
+fn workspace_colors_from_config(
+    config: &std::collections::BTreeMap<String, String>,
+) -> (
+    std::collections::HashMap<std::path::PathBuf, String>,
+    Vec<String>,
+) {
+    let mut map = std::collections::HashMap::new();
+    let mut diagnostics = Vec::new();
+    for (cwd, raw) in config {
+        if crate::config::try_parse_color(raw).is_some() {
+            map.insert(std::path::PathBuf::from(cwd), raw.clone());
+        } else {
+            diagnostics.push(format!(
+                "invalid workspace_colors entry for {cwd:?}: {raw:?}; ignored"
+            ));
+        }
+    }
+    (map, diagnostics)
+}
+
 /// Parse the configured agent name list into a deduplicated set of `Agent`
 /// values. Unknown agent names are silently dropped so a typo cannot disable
 /// other valid entries.
@@ -948,6 +970,11 @@ impl App {
                 needs_render = true;
             }
 
+            if let Some(req) = self.state.request_workspace_color_save.take() {
+                self.save_workspace_color(&req.cwd, req.value.as_deref());
+                needs_render = true;
+            }
+
             if self.state.request_submit_worktree_create {
                 self.state.request_submit_worktree_create = false;
                 self.submit_worktree_create_via_api();
@@ -1450,6 +1477,13 @@ impl App {
         if !invalid_section("theme") {
             self.state.theme_runtime = theme_runtime_config(config, !invalid_section("ui"));
             self.refresh_effective_app_theme();
+        }
+
+        {
+            let (map, mut ws_color_diags) =
+                workspace_colors_from_config(&config.workspace_colors);
+            self.state.workspace_colors = map;
+            diagnostics.append(&mut ws_color_diags);
         }
 
         let status = if diagnostics.is_empty() {
@@ -4566,5 +4600,24 @@ last_pane = "prefix+tab"
             &input[events[1].start..events[1].start + events[1].len],
             b"a"
         );
+    }
+
+    #[test]
+    fn workspace_colors_from_config_keeps_valid_drops_invalid() {
+        let mut cfg = std::collections::BTreeMap::new();
+        cfg.insert("/home/me/a".to_string(), "blue".to_string());
+        cfg.insert("/home/me/b".to_string(), "#abcdef".to_string());
+        cfg.insert("/home/me/c".to_string(), "garbage".to_string());
+        let (map, diags) = workspace_colors_from_config(&cfg);
+        assert_eq!(
+            map.get(std::path::Path::new("/home/me/a")).map(String::as_str),
+            Some("blue")
+        );
+        assert_eq!(
+            map.get(std::path::Path::new("/home/me/b")).map(String::as_str),
+            Some("#abcdef")
+        );
+        assert!(!map.contains_key(std::path::Path::new("/home/me/c")));
+        assert_eq!(diags.len(), 1);
     }
 }

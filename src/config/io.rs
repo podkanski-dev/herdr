@@ -435,8 +435,6 @@ pub fn remove_section_key(content: &str, section: &str, key: &str) -> String {
 }
 
 /// Quote a string as a TOML basic string key/value.
-// consumed by the workspace color save path (later task); allow until then.
-#[allow(dead_code)]
 fn toml_basic_string(value: &str) -> String {
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
@@ -444,8 +442,6 @@ fn toml_basic_string(value: &str) -> String {
 
 /// Upsert a `"<cwd>" = "<color>"` entry in the `[workspace_colors]` table,
 /// creating the table if missing.
-// consumed by the workspace color save path (later task); allow until then.
-#[allow(dead_code)]
 pub fn upsert_workspace_color(content: &str, cwd: &str, color: &str) -> String {
     const SECTION: &str = "[workspace_colors]";
     let key = toml_basic_string(cwd);
@@ -499,8 +495,6 @@ pub fn upsert_workspace_color(content: &str, cwd: &str, color: &str) -> String {
 }
 
 /// Remove a `"<cwd>" = ...` entry from the `[workspace_colors]` table.
-// consumed by the workspace color save path (later task); allow until then.
-#[allow(dead_code)]
 pub fn remove_workspace_color(content: &str, cwd: &str) -> String {
     const SECTION: &str = "[workspace_colors]";
     let key = toml_basic_string(cwd);

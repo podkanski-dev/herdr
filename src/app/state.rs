@@ -1064,7 +1064,6 @@ pub fn workspace_color_swatches(palette: &Palette) -> Vec<(String, Color)> {
 
 /// Pending request to persist a workspace color, drained by the App loop.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // consumed by the color save/persist task; allow until then.
 pub struct WorkspaceColorSaveRequest {
     pub cwd: std::path::PathBuf,
     /// `None` clears the color; `Some(v)` writes it.
@@ -1501,7 +1500,6 @@ pub struct AppState {
     #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
     pub color_picker: Option<ColorPickerState>,
     /// Pending color-save request for the App loop to persist.
-    #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
     pub request_workspace_color_save: Option<WorkspaceColorSaveRequest>,
     /// Highlight state for the bottom-right global launcher menu.
     pub global_menu: MenuListState,

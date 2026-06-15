@@ -26,11 +26,7 @@ pub use self::{
     sound::SoundConfig,
     theme::{parse_color, CustomThemeColors, ThemeConfig},
 };
-// try_parse_color is consumed by the workspace color picker (later tasks); allow until then.
-#[allow(unused_imports)]
 pub use theme::try_parse_color;
-// consumed by the workspace color save path (later task); allow until then.
-#[allow(unused_imports)]
 pub use io::{remove_workspace_color, upsert_workspace_color};
 
 pub(crate) use self::io::upsert_top_level_bool;

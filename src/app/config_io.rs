@@ -133,4 +133,19 @@ impl App {
             self.apply_config_from_disk(false);
         }
     }
+
+    pub(super) fn save_workspace_color(
+        &mut self,
+        cwd: &std::path::Path,
+        value: Option<&str>,
+    ) {
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let saved = self.update_config_file("workspace color", |content| match value {
+            Some(v) => crate::config::upsert_workspace_color(content, &cwd_str, v),
+            None => crate::config::remove_workspace_color(content, &cwd_str),
+        });
+        if saved {
+            self.apply_config_from_disk(false);
+        }
+    }
 }
