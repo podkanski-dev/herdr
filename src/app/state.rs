@@ -1525,7 +1525,6 @@ impl AppState {
     /// Curated swatch names (e.g. "blue", "mauve") resolve against the active
     /// palette so they stay theme-accurate and match what the picker shows.
     /// Everything else (hex like "#89b4fa", standard names) parses directly.
-    #[allow(dead_code)] // consumed by the accent bar render task; allow until then.
     pub fn workspace_accent_color(&self, ws_idx: usize) -> Option<Color> {
         let ws = self.workspaces.get(ws_idx)?;
         let raw = self.workspace_colors.get(&ws.identity_cwd)?;

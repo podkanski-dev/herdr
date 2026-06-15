@@ -972,6 +972,16 @@ fn render_workspace_list(
                 );
             }
         }
+
+        if let Some(accent) = app.workspace_accent_color(i) {
+            let buf = frame.buffer_mut();
+            for y in row_y..row_y + row_height {
+                if y >= list_bottom {
+                    break;
+                }
+                buf[(card.rect.x, y)].set_style(Style::default().bg(accent));
+            }
+        }
     }
 
     if let Some(y) = insertion_row.filter(|y| *y < list_bottom) {
