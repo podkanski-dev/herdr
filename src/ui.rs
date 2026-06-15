@@ -426,6 +426,9 @@ pub fn render_with_runtime_registry(
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
         Mode::Terminal => {}
+        Mode::ChooseWorkspaceColor => {
+            // Rendered in later tasks.
+        }
     }
 }
 
