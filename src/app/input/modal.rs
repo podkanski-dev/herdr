@@ -320,6 +320,76 @@ pub(super) fn open_rename_workspace(
     state.mode = Mode::RenameWorkspace;
 }
 
+pub(super) fn open_choose_workspace_color(
+    state: &mut AppState,
+    _terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ws_idx: usize,
+) {
+    use crate::app::state::{workspace_color_swatches, ColorPickerSelection, ColorPickerState};
+    state.selected = ws_idx;
+    let swatches = workspace_color_swatches(&state.palette);
+
+    let current = state
+        .workspaces
+        .get(ws_idx)
+        .and_then(|ws| state.workspace_colors.get(&ws.identity_cwd).cloned());
+    let (selected, hex_input) = match current {
+        None => (ColorPickerSelection::Clear, String::new()),
+        Some(value) => {
+            if let Some(i) = swatches.iter().position(|(name, _)| *name == value) {
+                (ColorPickerSelection::Swatch(i), String::new())
+            } else {
+                (ColorPickerSelection::Custom, value)
+            }
+        }
+    };
+
+    state.color_picker = Some(ColorPickerState {
+        ws_idx,
+        swatches,
+        selected,
+        hex_input,
+        error: None,
+    });
+    state.mode = Mode::ChooseWorkspaceColor;
+}
+
+// consumed by the color picker keyboard handler (next task); called in tests now
+#[allow(dead_code)]
+pub(super) fn apply_workspace_color(state: &mut AppState) {
+    use crate::app::state::WorkspaceColorSaveRequest;
+    let Some(picker) = state.color_picker.as_ref() else {
+        leave_modal(state);
+        return;
+    };
+    let ws_idx = picker.ws_idx;
+    let resolved = picker.resolved_value();
+    match resolved {
+        Ok(value) => {
+            if let Some(ws) = state.workspaces.get(ws_idx) {
+                let cwd = ws.identity_cwd.clone();
+                match &value {
+                    Some(v) => {
+                        state.workspace_colors.insert(cwd.clone(), v.clone());
+                    }
+                    None => {
+                        state.workspace_colors.remove(&cwd);
+                    }
+                }
+                state.request_workspace_color_save =
+                    Some(WorkspaceColorSaveRequest { cwd, value });
+            }
+            state.color_picker = None;
+            leave_modal(state);
+        }
+        Err(message) => {
+            if let Some(picker) = state.color_picker.as_mut() {
+                picker.error = Some(message);
+            }
+        }
+    }
+}
+
 pub(super) fn open_rename_active_tab(state: &mut AppState, replace_on_type: bool) {
     state.creating_new_tab = false;
     state.requested_new_tab_name = None;
@@ -704,6 +774,12 @@ pub(super) fn apply_context_menu_action(
                 state.mark_session_dirty();
             }
             leave_modal(state);
+        }
+        (
+            ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            Some("Set color"),
+        ) => {
+            open_choose_workspace_color(state, terminal_runtimes, ws_idx);
         }
         (
             ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
@@ -1423,7 +1499,7 @@ mod tests {
         };
         let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
-        apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, 1);
+        apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, 2);
 
         assert_eq!(state.selected, 0);
         assert_eq!(state.mode, Mode::ConfirmClose);
@@ -1432,6 +1508,52 @@ mod tests {
 
         assert!(state.workspaces.is_empty());
         assert_eq!(state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn set_color_opens_picker() {
+        let mut state = AppState::test_new();
+        state.workspaces.push(crate::workspace::Workspace::test_new("test"));
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        assert_eq!(state.mode, Mode::ChooseWorkspaceColor);
+        let picker = state.color_picker.as_ref().unwrap();
+        assert_eq!(picker.ws_idx, 0);
+        assert!(!picker.swatches.is_empty());
+    }
+
+    #[test]
+    fn applying_swatch_sets_save_request() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = AppState::test_new();
+        state.workspaces.push(crate::workspace::Workspace::test_new("test"));
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        if let Some(picker) = state.color_picker.as_mut() {
+            picker.selected = ColorPickerSelection::Swatch(5); // "blue"
+        }
+        apply_workspace_color(&mut state);
+        let req = state.request_workspace_color_save.take().unwrap();
+        assert_eq!(req.value.as_deref(), Some("blue"));
+        assert_eq!(req.cwd, state.workspaces[0].identity_cwd);
+        assert_eq!(state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn applying_invalid_hex_keeps_modal_open_with_error() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = AppState::test_new();
+        state.workspaces.push(crate::workspace::Workspace::test_new("test"));
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        if let Some(picker) = state.color_picker.as_mut() {
+            picker.selected = ColorPickerSelection::Custom;
+            picker.hex_input = "nope".to_string();
+        }
+        apply_workspace_color(&mut state);
+        assert_eq!(state.mode, Mode::ChooseWorkspaceColor);
+        assert!(state.request_workspace_color_save.is_none());
+        assert!(state.color_picker.as_ref().unwrap().error.is_some());
     }
 
     #[test]

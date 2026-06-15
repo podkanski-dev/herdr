@@ -756,7 +756,6 @@ pub enum Mode {
     RenameWorkspace,
     RenameTab,
     RenamePane,
-    #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
     ChooseWorkspaceColor,
     NewLinkedWorktree,
     OpenExistingWorktree,
@@ -1007,7 +1006,6 @@ pub struct SettingsState {
 
 /// Which choice is active in the workspace color picker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
 pub enum ColorPickerSelection {
     /// Clear the color.
     Clear,
@@ -1019,7 +1017,6 @@ pub enum ColorPickerSelection {
 
 /// State for the workspace color picker modal.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
 pub struct ColorPickerState {
     pub ws_idx: usize,
     /// (name, color) curated swatches, in display order.
@@ -1032,7 +1029,6 @@ pub struct ColorPickerState {
 impl ColorPickerState {
     /// Resolve the current selection to a config value:
     /// `Ok(None)` clears, `Ok(Some(v))` sets, `Err` is an invalid custom hex.
-    #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
     pub fn resolved_value(&self) -> Result<Option<String>, String> {
         match self.selected {
             ColorPickerSelection::Clear => Ok(None),
@@ -1049,7 +1045,6 @@ impl ColorPickerState {
 }
 
 /// Curated accent swatches drawn from the active palette.
-#[allow(dead_code)] // consumed by the color picker open/render tasks; allow until then.
 pub fn workspace_color_swatches(palette: &Palette) -> Vec<(String, Color)> {
     vec![
         ("red".to_string(), palette.red),
@@ -1162,16 +1157,16 @@ pub struct ContextMenuState {
 impl ContextMenuState {
     pub fn items(&self) -> &'static [&'static str] {
         match self.kind {
-            ContextMenuKind::Workspace { .. } => &["Rename", "Close"],
+            ContextMenuKind::Workspace { .. } => &["Rename", "Set color", "Close"],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
-            } => &["Rename", "Close", "New worktree", "Open worktree..."],
+            } => &["Rename", "Set color", "Close", "New worktree", "Open worktree..."],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: true,
                 ..
-            } => &["Rename", "Close", "Delete worktree checkout..."],
+            } => &["Rename", "Set color", "Close", "Delete worktree checkout..."],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: true,
@@ -1179,6 +1174,7 @@ impl ContextMenuState {
                 ..
             } => &[
                 "Rename",
+                "Set color",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
@@ -1191,6 +1187,7 @@ impl ContextMenuState {
                 ..
             } => &[
                 "Rename",
+                "Set color",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
@@ -1493,10 +1490,8 @@ pub struct AppState {
     pub(crate) next_plugin_command_log_id: u64,
     pub(crate) plugin_commands_in_flight: usize,
     /// Runtime per-workspace accent colors, keyed by identity_cwd → config value.
-    #[allow(dead_code)] // consumed by the color load/render tasks; allow until then.
     pub workspace_colors: std::collections::HashMap<std::path::PathBuf, String>,
     /// Active workspace color picker, when in `Mode::ChooseWorkspaceColor`.
-    #[allow(dead_code)] // consumed by the color picker input/render tasks; allow until then.
     pub color_picker: Option<ColorPickerState>,
     /// Pending color-save request for the App loop to persist.
     pub request_workspace_color_save: Option<WorkspaceColorSaveRequest>,
@@ -2313,7 +2308,7 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "Delete worktree checkout..."]
+            &["Rename", "Set color", "Close", "Delete worktree checkout..."]
         );
     }
 
@@ -2333,7 +2328,7 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "New worktree", "Open worktree..."]
+            &["Rename", "Set color", "Close", "New worktree", "Open worktree..."]
         );
     }
 
@@ -2355,12 +2350,24 @@ mod tests {
             menu.items(),
             &[
                 "Rename",
+                "Set color",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
                 "Collapse"
             ]
         );
+    }
+
+    #[test]
+    fn workspace_context_menu_has_set_color() {
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(menu.items().contains(&"Set color"));
     }
 
     #[test]
