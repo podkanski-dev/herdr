@@ -408,6 +408,7 @@ fn restore_workspace(
         Some(Workspace {
             id: workspace_id,
             custom_name: snap.custom_name.clone(),
+            accent_color: None,
             identity_cwd: snap.identity_cwd.clone(),
             cached_git_branch: crate::workspace::git_branch(&snap.identity_cwd),
             cached_git_ahead_behind: None,
