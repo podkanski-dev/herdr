@@ -289,6 +289,24 @@ yellow = "#f9e2af"
 
 Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
+## Workspace accent colors
+
+Give a workspace its own accent color and Herdr paints a one-column accent bar down the left edge of its card in the sidebar, so you can tell workspaces apart at a glance.
+
+Right-click a workspace and choose **Set color** to open the color picker. Pick one of the curated theme swatches, type a custom hex value into the `hex:` field, or choose **none** to clear the color. Move between choices with the arrow keys (or `Tab`), press `Enter` to save, and `Esc` to cancel. You can also click a swatch, the hex field, or the **save** / **cancel** buttons directly.
+
+Curated swatches follow your active theme palette, so they stay readable when you switch themes. Custom values accept the same formats as theme colors: hex, named colors, and `rgb(r,g,b)`.
+
+Colors are saved to your config under `[workspace_colors]`, keyed by each workspace's working directory:
+
+```toml
+[workspace_colors]
+"/home/you/code/herdr" = "blue"
+"/home/you/code/website" = "#f38ba8"
+```
+
+You normally manage this table through the picker rather than editing it by hand. Invalid or unparseable values are ignored on load.
+
 ## UI and sidebar
 
 The sidebar is the main Herdr dashboard. It shows workspaces, tabs, panes, and agent state.
