@@ -1162,11 +1162,22 @@ impl ContextMenuState {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
-            } => &["Rename", "Set color", "Close", "New worktree", "Open worktree..."],
+            } => &[
+                "Rename",
+                "Set color",
+                "Close",
+                "New worktree",
+                "Open worktree...",
+            ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: true,
                 ..
-            } => &["Rename", "Set color", "Close", "Delete worktree checkout..."],
+            } => &[
+                "Rename",
+                "Set color",
+                "Close",
+                "Delete worktree checkout...",
+            ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: true,
@@ -2309,7 +2320,12 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Set color", "Close", "Delete worktree checkout..."]
+            &[
+                "Rename",
+                "Set color",
+                "Close",
+                "Delete worktree checkout..."
+            ]
         );
     }
 
@@ -2329,7 +2345,13 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Set color", "Close", "New worktree", "Open worktree..."]
+            &[
+                "Rename",
+                "Set color",
+                "Close",
+                "New worktree",
+                "Open worktree..."
+            ]
         );
     }
 
@@ -2379,7 +2401,9 @@ mod tests {
         let cwd = state.workspaces[0].identity_cwd.clone();
         // A curated swatch name resolves to the active palette's themed color,
         // not the base ratatui color — including palette-only names like mauve.
-        state.workspace_colors.insert(cwd.clone(), "blue".to_string());
+        state
+            .workspace_colors
+            .insert(cwd.clone(), "blue".to_string());
         assert_eq!(state.workspace_accent_color(0), Some(state.palette.blue));
         state.workspace_colors.insert(cwd, "mauve".to_string());
         assert_eq!(state.workspace_accent_color(0), Some(state.palette.mauve));

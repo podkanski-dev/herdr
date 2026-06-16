@@ -835,8 +835,7 @@ mouse_capture = false
 
     #[test]
     fn remove_workspace_color_drops_only_the_key() {
-        let content =
-            "[workspace_colors]\n\"/home/me/a\" = \"blue\"\n\"/home/me/b\" = \"red\"\n";
+        let content = "[workspace_colors]\n\"/home/me/a\" = \"blue\"\n\"/home/me/b\" = \"red\"\n";
         let out = remove_workspace_color(content, "/home/me/a");
         assert!(!out.contains("/home/me/a"));
         assert!(out.contains("\"/home/me/b\" = \"red\""));
@@ -848,7 +847,10 @@ mouse_capture = false
         let out = upsert_workspace_color(content, "/home/me/b", "red");
         let a = out.find("/home/me/a").unwrap();
         let b = out.find("/home/me/b").unwrap();
-        assert!(a < b, "existing key should come before the appended key:\n{out}");
+        assert!(
+            a < b,
+            "existing key should come before the appended key:\n{out}"
+        );
     }
 
     #[test]

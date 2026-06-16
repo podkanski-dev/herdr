@@ -26,8 +26,8 @@ pub use self::{
     sound::SoundConfig,
     theme::{parse_color, CustomThemeColors, ThemeConfig},
 };
-pub use theme::try_parse_color;
 pub use io::{remove_workspace_color, upsert_workspace_color};
+pub use theme::try_parse_color;
 
 pub(crate) use self::io::upsert_top_level_bool;
 pub(crate) use self::keybinds::parse_key_combo;

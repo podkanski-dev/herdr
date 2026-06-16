@@ -99,14 +99,13 @@ pub(super) fn render_color_picker(app: &AppState, frame: &mut Frame, area: Rect)
         &app.palette,
     );
 
-    for (idx, (cell, (_name, color))) in layout.swatch_cells.iter().zip(&picker.swatches).enumerate() {
+    for (idx, (cell, (_name, color))) in
+        layout.swatch_cells.iter().zip(&picker.swatches).enumerate()
+    {
         let selected = picker.selected == ColorPickerSelection::Swatch(idx);
         let block = if selected { "[██]" } else { " ██ " };
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                block,
-                Style::default().fg(*color),
-            ))),
+            Paragraph::new(Line::from(Span::styled(block, Style::default().fg(*color)))),
             *cell,
         );
     }
@@ -125,8 +124,11 @@ pub(super) fn render_color_picker(app: &AppState, frame: &mut Frame, area: Rect)
     let caret = if custom { "█" } else { "" };
     frame.render_widget(Clear, layout.hex_input);
     frame.render_widget(
-        Paragraph::new(format!(" hex: {}{}", picker.hex_input, caret))
-            .style(Style::default().fg(app.palette.text).bg(app.palette.surface0)),
+        Paragraph::new(format!(" hex: {}{}", picker.hex_input, caret)).style(
+            Style::default()
+                .fg(app.palette.text)
+                .bg(app.palette.surface0),
+        ),
         layout.hex_input,
     );
 

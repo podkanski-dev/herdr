@@ -1480,8 +1480,7 @@ impl App {
         }
 
         {
-            let (map, mut ws_color_diags) =
-                workspace_colors_from_config(&config.workspace_colors);
+            let (map, mut ws_color_diags) = workspace_colors_from_config(&config.workspace_colors);
             self.state.workspace_colors = map;
             diagnostics.append(&mut ws_color_diags);
         }
@@ -4610,11 +4609,13 @@ last_pane = "prefix+tab"
         cfg.insert("/home/me/c".to_string(), "garbage".to_string());
         let (map, diags) = workspace_colors_from_config(&cfg);
         assert_eq!(
-            map.get(std::path::Path::new("/home/me/a")).map(String::as_str),
+            map.get(std::path::Path::new("/home/me/a"))
+                .map(String::as_str),
             Some("blue")
         );
         assert_eq!(
-            map.get(std::path::Path::new("/home/me/b")).map(String::as_str),
+            map.get(std::path::Path::new("/home/me/b"))
+                .map(String::as_str),
             Some("#abcdef")
         );
         assert!(!map.contains_key(std::path::Path::new("/home/me/c")));
