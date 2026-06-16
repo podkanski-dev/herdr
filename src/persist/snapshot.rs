@@ -52,6 +52,8 @@ pub struct WorkspaceSnapshot {
     pub id: Option<String>,
     #[serde(default)]
     pub custom_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent_color: Option<String>,
     pub identity_cwd: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
@@ -154,6 +156,7 @@ impl From<LegacyWorkspaceSnapshot> for WorkspaceSnapshot {
         Self {
             id: None,
             custom_name: snap.custom_name,
+            accent_color: None,
             identity_cwd,
             worktree_space: None,
             public_pane_numbers: HashMap::new(),
@@ -285,6 +288,7 @@ fn capture_workspace(
     WorkspaceSnapshot {
         id: Some(ws.id.clone()),
         custom_name: ws.custom_name.clone(),
+        accent_color: ws.accent_color.clone(),
         identity_cwd: ws
             .resolved_identity_cwd_from(terminals, terminal_runtimes)
             .unwrap_or_else(|| ws.identity_cwd.clone()),
@@ -625,6 +629,7 @@ mod tests {
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("wproj".to_string()),
                 custom_name: Some("pi-mono".to_string()),
+                accent_color: None,
                 identity_cwd: PathBuf::from("/home/can/Projects/herdr"),
                 worktree_space: None,
                 public_pane_numbers: HashMap::from([(0, 1), (1, 2)]),
@@ -1150,6 +1155,29 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_preserves_workspace_accent_color() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("colored"));
+        if let Some(ws) = state.workspaces.last_mut() {
+            ws.accent_color = Some("blue".to_string());
+        }
+        state.ensure_test_terminals();
+
+        let snap = capture_from_state(&state);
+        let json = serde_json::to_string(&snap).unwrap();
+        let parsed = parse_snapshot(&json).unwrap();
+
+        let ws = parsed
+            .workspaces
+            .iter()
+            .find(|w| w.accent_color.is_some())
+            .expect("a workspace should carry an accent color");
+        assert_eq!(ws.accent_color.as_deref(), Some("blue"));
+    }
+
+    #[test]
     fn restore_falls_back_to_home_when_cwd_missing() {
         let mut panes = HashMap::new();
         panes.insert(
@@ -1180,6 +1208,7 @@ mod tests {
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("test-ws".to_string()),
                 custom_name: Some("fallback test".to_string()),
+                accent_color: None,
                 identity_cwd: PathBuf::from("/tmp"),
                 worktree_space: None,
                 public_pane_numbers: HashMap::new(),
