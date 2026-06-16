@@ -291,13 +291,13 @@ Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `rese
 
 ## Workspace accent colors
 
-Give a workspace its own accent color and Herdr paints a one-column accent bar down the left edge of its card in the sidebar, so you can tell workspaces apart at a glance.
+Give a workspace its own accent color and Herdr paints a one-column accent bar down the left edge of its card in the sidebar.
 
-Right-click a workspace and choose **Set color** to open the color picker. Pick one of the curated theme swatches, type a custom hex value into the `hex:` field, or choose **none** to clear the color. Move between choices with the arrow keys (or `Tab`), press `Enter` to save, and `Esc` to cancel. You can also click a swatch, the hex field, or the **save** / **cancel** buttons directly.
+There are two layers:
 
-Curated swatches follow your active theme palette, so they stay readable when you switch themes. Custom values accept the same formats as theme colors: hex, named colors, and `rgb(r,g,b)`.
+**Per workspace (set in the app).** Right-click a workspace and choose **Set color** to open the color picker. Pick a curated theme swatch, type a custom hex value into the `hex:` field, or choose **none** to clear it. Move between choices with the arrow keys (or `Tab`), press `Enter` to save, and `Esc` to cancel; you can also click a swatch, the hex field, or the **save** / **cancel** buttons. This color belongs to that specific workspace, persists with the session (per named session), and is independent of the working directory — two workspaces in the same directory can have different colors, and the color stays put if the working directory changes.
 
-Colors are saved to your config under `[workspace_colors]`, keyed by each workspace's working directory:
+**Per directory (set in config).** You can also map a working directory to a default color in `config.toml`. Any workspace whose working directory matches picks up that color automatically, unless it has its own per-workspace color set in the app:
 
 ```toml
 [workspace_colors]
@@ -305,7 +305,7 @@ Colors are saved to your config under `[workspace_colors]`, keyed by each worksp
 "/home/you/code/website" = "#f38ba8"
 ```
 
-You normally manage this table through the picker rather than editing it by hand. Invalid or unparseable values are ignored on load.
+A workspace's effective color is its per-workspace color if set, otherwise the directory default for its working directory, otherwise none. New workspaces start with no per-workspace color. Curated swatches follow your active theme palette; custom values accept the same formats as theme colors (hex, named colors, and `rgb(r,g,b)`). Invalid or unparseable values are ignored.
 
 ## UI and sidebar
 
