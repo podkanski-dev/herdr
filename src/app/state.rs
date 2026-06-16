@@ -1057,14 +1057,6 @@ pub fn workspace_color_swatches(palette: &Palette) -> Vec<(String, Color)> {
     ]
 }
 
-/// Pending request to persist a workspace color, drained by the App loop.
-#[derive(Debug, Clone)]
-pub struct WorkspaceColorSaveRequest {
-    pub cwd: std::path::PathBuf,
-    /// `None` clears the color; `Some(v)` writes it.
-    pub value: Option<String>,
-}
-
 pub(crate) enum DragTarget {
     WorkspaceReorder {
         source_ws_idx: usize,
@@ -1505,8 +1497,6 @@ pub struct AppState {
     pub workspace_colors: std::collections::HashMap<std::path::PathBuf, String>,
     /// Active workspace color picker, when in `Mode::ChooseWorkspaceColor`.
     pub color_picker: Option<ColorPickerState>,
-    /// Pending color-save request for the App loop to persist.
-    pub request_workspace_color_save: Option<WorkspaceColorSaveRequest>,
     /// Highlight state for the bottom-right global launcher menu.
     pub global_menu: MenuListState,
     /// Resolved host terminal default colors for theming embedded panes.
@@ -1893,7 +1883,6 @@ impl AppState {
             terminal_runtime_shutdowns: Vec::new(),
             workspace_colors: std::collections::HashMap::new(),
             color_picker: None,
-            request_workspace_color_save: None,
         }
     }
 

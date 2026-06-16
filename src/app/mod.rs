@@ -669,7 +669,6 @@ impl App {
             terminal_runtime_shutdowns: Vec::new(),
             workspace_colors: std::collections::HashMap::new(),
             color_picker: None,
-            request_workspace_color_save: None,
         };
 
         state.terminals = restored_terminals;
@@ -967,11 +966,6 @@ impl App {
 
             if let Some(ws_idx) = self.state.request_remove_linked_worktree.take() {
                 self.open_remove_linked_worktree_confirmation(ws_idx);
-                needs_render = true;
-            }
-
-            if let Some(req) = self.state.request_workspace_color_save.take() {
-                self.save_workspace_color(&req.cwd, req.value.as_deref());
                 needs_render = true;
             }
 
