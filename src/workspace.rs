@@ -150,9 +150,6 @@ pub struct Workspace {
     /// Per-workspace accent color override (swatch name, hex, or color name).
     /// Set via the color picker; takes precedence over the directory default.
     /// `None` means inherit the directory default (or no accent).
-    // Field is wired up in subsequent tasks (persist, resolve, picker); suppress
-    // dead_code until the first read site exists in this binary.
-    #[allow(dead_code)]
     pub accent_color: Option<String>,
     /// Fallback workspace identity source for tests, old snapshots, or missing runtimes.
     pub identity_cwd: PathBuf,

@@ -1530,14 +1530,28 @@ impl AppState {
         self.sound.enabled
     }
 
-    /// Resolve a workspace's accent color from the runtime map, if valid.
+    /// Resolve a workspace's accent color using two-layer lookup:
+    /// 1. Per-workspace override (`ws.accent_color`) takes precedence.
+    /// 2. Directory default from config, keyed by `identity_cwd`, as fallback.
     ///
     /// Curated swatch names (e.g. "blue", "mauve") resolve against the active
     /// palette so they stay theme-accurate and match what the picker shows.
     /// Everything else (hex like "#89b4fa", standard names) parses directly.
     pub fn workspace_accent_color(&self, ws_idx: usize) -> Option<Color> {
         let ws = self.workspaces.get(ws_idx)?;
-        let raw = self.workspace_colors.get(&ws.identity_cwd)?;
+        // Layer 2: explicit per-workspace override (session state).
+        // Layer 1: directory default from config, keyed by identity_cwd.
+        let raw: &str = match ws.accent_color.as_deref() {
+            Some(value) => value,
+            None => self.workspace_colors.get(&ws.identity_cwd)?.as_str(),
+        };
+        self.resolve_accent_value(raw)
+    }
+
+    /// Resolve a stored accent value to a `Color`. Curated swatch names
+    /// (e.g. "blue", "mauve") resolve against the active palette so they stay
+    /// theme-accurate; everything else (hex, standard names) parses directly.
+    fn resolve_accent_value(&self, raw: &str) -> Option<Color> {
         if let Some((_, color)) = workspace_color_swatches(&self.palette)
             .into_iter()
             .find(|(name, _)| name == raw)
@@ -2429,6 +2443,50 @@ mod tests {
         let cwd = state.workspaces[0].identity_cwd.clone();
         state.workspace_colors.insert(cwd, "garbage".to_string());
         assert_eq!(state.workspace_accent_color(0), None);
+    }
+
+    #[test]
+    fn accent_color_override_beats_directory_default() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("a"));
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        // Directory default = red for this cwd.
+        state.workspace_colors.insert(cwd, "red".to_string());
+        // Per-workspace override = blue.
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.blue));
+    }
+
+    #[test]
+    fn accent_color_falls_back_to_directory_default() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("a"));
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        state.workspace_colors.insert(cwd, "green".to_string());
+        // No per-workspace override -> directory default applies.
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.green));
+    }
+
+    #[test]
+    fn accent_color_override_is_per_workspace_for_same_cwd() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("a"));
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("b"));
+        // Force both workspaces to share the same identity_cwd.
+        let shared = state.workspaces[0].identity_cwd.clone();
+        state.workspaces[1].identity_cwd = shared;
+        // Only the first workspace gets an override.
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.blue));
+        assert_eq!(state.workspace_accent_color(1), None);
     }
 
     #[test]
