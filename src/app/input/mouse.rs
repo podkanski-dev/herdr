@@ -19,8 +19,9 @@ use super::WheelRouting;
 use super::{
     modal::{
         apply_context_menu_action, apply_global_menu_action, apply_rename_action,
-        confirm_close_accept, confirm_close_cancel, global_menu_actions, leave_modal,
-        modal_action_from_buttons, open_global_menu, open_new_tab_dialog, ModalAction,
+        apply_workspace_color, cancel_workspace_color, confirm_close_accept, confirm_close_cancel,
+        global_menu_actions, leave_modal, modal_action_from_buttons, open_global_menu,
+        open_new_tab_dialog, ModalAction,
     },
     settings::SettingsAction,
     ScrollbarClickTarget, TAB_DRAG_THRESHOLD, WORKSPACE_DRAG_THRESHOLD,
@@ -168,7 +169,10 @@ impl AppState {
 
         if matches!(
             self.mode,
-            Mode::NewLinkedWorktree | Mode::OpenExistingWorktree | Mode::ConfirmRemoveWorktree
+            Mode::NewLinkedWorktree
+                | Mode::OpenExistingWorktree
+                | Mode::ConfirmRemoveWorktree
+                | Mode::ChooseWorkspaceColor
         ) && !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
             return None;
@@ -200,6 +204,39 @@ impl AppState {
                         Some(ModalAction::Confirm) => confirm_close_accept(self),
                         Some(ModalAction::Cancel) | None => confirm_close_cancel(self),
                         _ => {}
+                    }
+                    return None;
+                }
+
+                if self.mode == Mode::ChooseWorkspaceColor {
+                    if let Some(layout) =
+                        crate::ui::color_picker::color_picker_layout(self.screen_rect())
+                    {
+                        use crate::app::state::ColorPickerSelection;
+                        if rect_contains(layout.save, mouse.column, mouse.row) {
+                            apply_workspace_color(self);
+                            return None;
+                        }
+                        if rect_contains(layout.cancel, mouse.column, mouse.row) {
+                            cancel_workspace_color(self);
+                            return None;
+                        }
+                        if let Some(picker) = self.color_picker.as_mut() {
+                            if rect_contains(layout.none_cell, mouse.column, mouse.row) {
+                                picker.selected = ColorPickerSelection::Clear;
+                                picker.error = None;
+                            } else if rect_contains(layout.hex_input, mouse.column, mouse.row) {
+                                picker.selected = ColorPickerSelection::Custom;
+                                picker.error = None;
+                            } else if let Some(idx) = layout
+                                .swatch_cells
+                                .iter()
+                                .position(|cell| rect_contains(*cell, mouse.column, mouse.row))
+                            {
+                                picker.selected = ColorPickerSelection::Swatch(idx);
+                                picker.error = None;
+                            }
+                        }
                     }
                     return None;
                 }
