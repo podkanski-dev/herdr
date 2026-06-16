@@ -332,7 +332,7 @@ pub(super) fn open_choose_workspace_color(
     let current = state
         .workspaces
         .get(ws_idx)
-        .and_then(|ws| state.workspace_colors.get(&ws.identity_cwd).cloned());
+        .and_then(|ws| ws.accent_color.clone());
     let (selected, hex_input) = match current {
         None => (ColorPickerSelection::Clear, String::new()),
         Some(value) => {
@@ -355,27 +355,17 @@ pub(super) fn open_choose_workspace_color(
 }
 
 pub(super) fn apply_workspace_color(state: &mut AppState) {
-    use crate::app::state::WorkspaceColorSaveRequest;
     let Some(picker) = state.color_picker.as_ref() else {
         leave_modal(state);
         return;
     };
     let ws_idx = picker.ws_idx;
-    let resolved = picker.resolved_value();
-    match resolved {
+    match picker.resolved_value() {
         Ok(value) => {
-            if let Some(ws) = state.workspaces.get(ws_idx) {
-                let cwd = ws.identity_cwd.clone();
-                match &value {
-                    Some(v) => {
-                        state.workspace_colors.insert(cwd.clone(), v.clone());
-                    }
-                    None => {
-                        state.workspace_colors.remove(&cwd);
-                    }
-                }
-                state.request_workspace_color_save = Some(WorkspaceColorSaveRequest { cwd, value });
+            if let Some(ws) = state.workspaces.get_mut(ws_idx) {
+                ws.accent_color = value;
             }
+            state.mark_session_dirty();
             state.color_picker = None;
             leave_modal(state);
         }
@@ -1617,7 +1607,7 @@ mod tests {
     }
 
     #[test]
-    fn applying_swatch_sets_save_request() {
+    fn applying_swatch_sets_workspace_override() {
         use crate::app::state::ColorPickerSelection;
         let mut state = AppState::test_new();
         state
@@ -1628,10 +1618,29 @@ mod tests {
         if let Some(picker) = state.color_picker.as_mut() {
             picker.selected = ColorPickerSelection::Swatch(5); // "blue"
         }
+        state.session_dirty = false;
         apply_workspace_color(&mut state);
-        let req = state.request_workspace_color_save.take().unwrap();
-        assert_eq!(req.value.as_deref(), Some("blue"));
-        assert_eq!(req.cwd, state.workspaces[0].identity_cwd);
+        assert_eq!(state.workspaces[0].accent_color.as_deref(), Some("blue"));
+        assert!(state.session_dirty);
+        assert_eq!(state.mode, Mode::Navigate);
+        assert!(state.color_picker.is_none());
+    }
+
+    #[test]
+    fn applying_none_clears_workspace_override() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("test"));
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        if let Some(picker) = state.color_picker.as_mut() {
+            picker.selected = ColorPickerSelection::Clear;
+        }
+        apply_workspace_color(&mut state);
+        assert!(state.workspaces[0].accent_color.is_none());
         assert_eq!(state.mode, Mode::Navigate);
     }
 
@@ -1650,7 +1659,7 @@ mod tests {
         }
         apply_workspace_color(&mut state);
         assert_eq!(state.mode, Mode::ChooseWorkspaceColor);
-        assert!(state.request_workspace_color_save.is_none());
+        assert!(state.workspaces[0].accent_color.is_none());
         assert!(state.color_picker.as_ref().unwrap().error.is_some());
     }
 
@@ -1728,15 +1737,7 @@ mod tests {
         );
         assert_eq!(state.mode, Mode::Navigate);
         assert!(state.color_picker.is_none());
-        assert_eq!(
-            state
-                .request_workspace_color_save
-                .take()
-                .unwrap()
-                .value
-                .as_deref(),
-            Some("red")
-        );
+        assert_eq!(state.workspaces[0].accent_color.as_deref(), Some("red"));
 
         let mut state = open_picker_with_workspace();
         handle_choose_workspace_color_key(
@@ -1745,7 +1746,7 @@ mod tests {
         );
         assert_eq!(state.mode, Mode::Navigate);
         assert!(state.color_picker.is_none());
-        assert!(state.request_workspace_color_save.is_none());
+        assert!(state.workspaces[0].accent_color.is_none());
     }
 
     #[test]
