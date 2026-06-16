@@ -134,11 +134,7 @@ impl App {
         }
     }
 
-    pub(super) fn save_workspace_color(
-        &mut self,
-        cwd: &std::path::Path,
-        value: Option<&str>,
-    ) {
+    pub(super) fn save_workspace_color(&mut self, cwd: &std::path::Path, value: Option<&str>) {
         let cwd_str = cwd.to_string_lossy().to_string();
         let saved = self.update_config_file("workspace color", |content| match value {
             Some(v) => crate::config::upsert_workspace_color(content, &cwd_str, v),

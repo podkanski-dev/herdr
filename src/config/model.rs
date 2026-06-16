@@ -1635,11 +1635,17 @@ scrollback_lines = 12345
 "##;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(
-            config.workspace_colors.get("/home/me/proj").map(String::as_str),
+            config
+                .workspace_colors
+                .get("/home/me/proj")
+                .map(String::as_str),
             Some("blue")
         );
         assert_eq!(
-            config.workspace_colors.get("/home/me/api").map(String::as_str),
+            config
+                .workspace_colors
+                .get("/home/me/api")
+                .map(String::as_str),
             Some("#89b4fa")
         );
     }
