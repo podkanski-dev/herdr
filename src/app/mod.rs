@@ -667,7 +667,7 @@ impl App {
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
-            workspace_colors: std::collections::HashMap::new(),
+            workspace_colors: workspace_colors_from_config(&config.workspace_colors).0,
             color_picker: None,
         };
 
@@ -2440,6 +2440,35 @@ mod tests {
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         restore_xdg_state_home(original_xdg_state_home);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn startup_loads_workspace_colors_from_config() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("startup-workspace-colors");
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut config = Config {
+            onboarding: Some(false),
+            ..Default::default()
+        };
+        config
+            .workspace_colors
+            .insert("/tmp/herdr-accent-test".to_string(), "blue".to_string());
+
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+
+        assert_eq!(
+            app.state
+                .workspace_colors
+                .get(std::path::Path::new("/tmp/herdr-accent-test"))
+                .map(String::as_str),
+            Some("blue")
+        );
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
