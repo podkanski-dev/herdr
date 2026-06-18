@@ -844,6 +844,38 @@ mod tests {
     }
 
     #[test]
+    fn collapsed_sidebar_paints_accent_stripe_in_gutter() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.sidebar_collapsed = true;
+        let mut ws = Workspace::test_new("one");
+        ws.accent_color = Some("blue".to_string());
+        app.workspaces = vec![ws, Workspace::test_new("two")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let (ws_area, _, _) = collapsed_sidebar_sections(app.view.sidebar_rect);
+        let accent = app.workspace_accent_color(0).expect("workspace 0 has blue accent");
+
+        // Column 0 (the gutter) should have the accent background color.
+        let gutter_x = ws_area.x;
+        let gutter_cell = &buffer[(gutter_x, ws_area.y)];
+        assert_eq!(
+            gutter_cell.style().bg,
+            Some(accent),
+            "gutter column (x={}) should have accent background for accentuated workspace",
+            gutter_x
+        );
+    }
+
+    #[test]
     fn expanded_sidebar_workspace_rows_show_state_before_name_without_numbers() {
         let mut app = crate::app::state::AppState::test_new();
         let mut ws = Workspace::test_new("one");

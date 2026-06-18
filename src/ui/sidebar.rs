@@ -696,6 +696,11 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             ])),
             Rect::new(ws_area.x + 1, y, ws_area.width.saturating_sub(1), 1),
         );
+
+        if let Some(accent) = app.workspace_accent_color(visible_idx) {
+            let buf = frame.buffer_mut();
+            buf[(ws_area.x, y)].set_style(Style::default().bg(accent));
+        }
     }
 
     if let Some(divider_y) = divider_y {
