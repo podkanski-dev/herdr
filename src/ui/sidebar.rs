@@ -694,7 +694,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
                 Span::styled(" ", row_style),
                 Span::styled(icon, icon_style),
             ])),
-            Rect::new(ws_area.x + 1, y, ws_area.width.saturating_sub(1), 1),
+            Rect::new(ws_area.x + 2, y, ws_area.width.saturating_sub(2), 1),
         );
 
         if let Some(accent) = app.workspace_accent_color(visible_idx) {
@@ -743,9 +743,9 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
                             Span::styled(icon, icon_style),
                         ])),
                         Rect::new(
-                            detail_content_area.x + 1,
+                            detail_content_area.x + 2,
                             y,
-                            detail_content_area.width.saturating_sub(1),
+                            detail_content_area.width.saturating_sub(2),
                             1,
                         ),
                     );
@@ -911,7 +911,7 @@ fn render_workspace_list(
             }
             line1.push(Span::styled(" ", Style::default()));
         } else {
-            line1.push(Span::styled(" ", Style::default()));
+            line1.push(Span::styled("  ", Style::default()));
         }
         if show_workspace_icon {
             line1.push(Span::styled(icon, icon_style));
@@ -958,7 +958,7 @@ fn render_workspace_list(
                 } else {
                     p.overlay0
                 };
-                let branch_indent = if card.indented { "     " } else { "   " };
+                let branch_indent = if card.indented { "     " } else { "    " };
                 let mut spans = vec![
                     Span::styled(branch_indent, Style::default()),
                     Span::styled(branch_display, Style::default().fg(branch_color)),

@@ -634,6 +634,15 @@ fn render_mobile_switcher_content(
             truncate_end(&detail, content.width as usize),
             p.overlay0,
         );
+        // Accent stripe on the left edge, mirroring the desktop sidebar.
+        // Painted after the row so it stays visible on selected/active rows.
+        if let Some(accent) = app.workspace_accent_color(idx) {
+            for offset in 0..2 {
+                if let Some(y) = visible_y(viewport, app.mobile_switcher_scroll, doc_y + offset) {
+                    frame.buffer_mut()[(content.x, y)].set_style(Style::default().bg(accent));
+                }
+            }
+        }
         doc_y += 2;
     }
 
@@ -1375,6 +1384,54 @@ mod tests {
 
         assert!(row.contains("tab 2"), "mobile tab row: {row:?}");
         assert!(!row.contains("tab 3"), "mobile tab row: {row:?}");
+    }
+
+    #[test]
+    fn mobile_switcher_paints_workspace_accent_stripe() {
+        fn blue_bg_cells(
+            terminal: &ratatui::Terminal<ratatui::backend::TestBackend>,
+            blue: ratatui::style::Color,
+        ) -> usize {
+            let buffer = terminal.backend().buffer();
+            (0..40)
+                .flat_map(|x| (0..20).map(move |y| (x, y)))
+                .filter(|&(x, y)| buffer[(x, y)].style().bg == Some(blue))
+                .count()
+        }
+
+        fn render(app: &crate::app::state::AppState) -> ratatui::Terminal<ratatui::backend::TestBackend> {
+            let backend = ratatui::backend::TestBackend::new(40, 20);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    render_mobile_panel(
+                        app,
+                        &TerminalRuntimeRegistry::new(),
+                        frame,
+                        Rect::new(0, 0, 40, 20),
+                    )
+                })
+                .unwrap();
+            terminal
+        }
+
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![
+            crate::workspace::Workspace::test_new("one"),
+            crate::workspace::Workspace::test_new("two"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.view.mobile_header_rect = Rect::new(0, 0, 40, 2);
+        app.view.terminal_area = Rect::new(0, 2, 40, 18);
+
+        // No accent set on any workspace: no blue-background cells.
+        assert_eq!(blue_bg_cells(&render(&app), app.palette.blue), 0);
+
+        // Accent on the first workspace: its row gets a blue left-edge stripe.
+        app.workspaces[0].accent_color = Some("blue".to_string());
+        assert!(blue_bg_cells(&render(&app), app.palette.blue) >= 1);
     }
 
     #[cfg(unix)]

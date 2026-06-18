@@ -15,6 +15,7 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "theme",
     "ui",
     "update",
+    "workspace_colors",
     "worktrees",
 ];
 
@@ -628,6 +629,23 @@ delivery = "herdr"
             loaded.config.ui.toast.delivery,
             super::super::ToastDelivery::Herdr
         );
+    }
+
+    #[test]
+    fn load_live_config_does_not_warn_about_workspace_colors_section() {
+        // `[workspace_colors]` is a recognized top-level section loaded at
+        // startup (see `startup_loads_workspace_colors_from_config`). The live
+        // loader does not reload it, but it must not flag it as unknown.
+        let loaded = load_live_config_from_str(
+            r#"
+[workspace_colors]
+"/home/user/project" = "blue"
+"#,
+        )
+        .unwrap();
+
+        assert!(loaded.diagnostics.is_empty());
+        assert!(loaded.invalid_sections.is_empty());
     }
 
     #[test]

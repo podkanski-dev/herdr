@@ -1671,7 +1671,7 @@ impl App {
                 // Should not be called in terminal mode.
             }
             Mode::ChooseWorkspaceColor => {
-                // Handled in later tasks.
+                input::handle_choose_workspace_color_key(&mut self.state, key_event);
             }
         }
     }
@@ -2226,6 +2226,37 @@ mod tests {
         let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
 
         assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Priority);
+    }
+
+    #[test]
+    fn headless_color_picker_accepts_hex_typing() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app =
+            App::new(&Config::default(), true, None, api_rx, crate::api::EventHub::default());
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.color_picker = Some(state::ColorPickerState {
+            ws_idx: 0,
+            swatches: state::workspace_color_swatches(&app.state.palette),
+            selected: state::ColorPickerSelection::Clear,
+            hex_input: String::new(),
+            error: None,
+        });
+        app.state.mode = Mode::ChooseWorkspaceColor;
+
+        // The headless server path (not the interactive `handle_key` path) is
+        // what the client/server runtime uses. It must route picker keys to
+        // the handler, not drop them.
+        for c in ['#', 'a', 'b', 'c', 'd', 'e', 'f'] {
+            app.handle_non_terminal_key_headless(crate::input::TerminalKey::new(
+                KeyCode::Char(c),
+                KeyModifiers::empty(),
+            ));
+        }
+
+        let picker = app.state.color_picker.as_ref().expect("picker open");
+        assert_eq!(picker.hex_input, "#abcdef");
     }
 
     #[test]
