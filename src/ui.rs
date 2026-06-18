@@ -93,7 +93,7 @@ use crate::app::state::ViewLayout;
 use crate::app::{AppState, Mode};
 use crate::terminal::TerminalRuntimeRegistry;
 
-const COLLAPSED_WIDTH: u16 = 5; // stripe + num + space + dot + separator
+const COLLAPSED_WIDTH: u16 = 6; // stripe + gap + num + space + dot + separator
 
 // Braille spinner frames — smooth rotation
 const SPINNERS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -853,8 +853,8 @@ mod tests {
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
-        // Collapsed bar is now 5 columns wide.
-        assert_eq!(app.view.sidebar_rect.width, 5);
+        // Collapsed bar is now 6 columns wide.
+        assert_eq!(app.view.sidebar_rect.width, 6);
 
         let backend = TestBackend::new(80, 20);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -862,11 +862,12 @@ mod tests {
         let buffer = terminal.backend().buffer();
 
         let (ws_area, _, _) = collapsed_sidebar_sections(app.view.sidebar_rect);
-        // Column 0 is a blank gutter; the "1" digit sits one column right.
+        // Column 0 is the stripe gutter, column 1 is a blank gap; the "1"
+        // digit sits two columns right.
         let row0 = buffer_row_text(buffer, ws_area, ws_area.y);
         assert!(
-            row0.starts_with(" 1"),
-            "expected a leading gutter then the number, got {row0:?}"
+            row0.starts_with("  1"),
+            "expected a stripe gutter and gap before the number, got {row0:?}"
         );
     }
 
@@ -874,11 +875,11 @@ mod tests {
     fn collapsed_sidebar_paints_accent_stripe_in_gutter() {
         let mut app = crate::app::state::AppState::test_new();
         app.sidebar_collapsed = true;
-        let mut ws = Workspace::test_new("one");
-        ws.accent_color = Some("blue".to_string());
-        app.workspaces = vec![ws, Workspace::test_new("two")];
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        // Accent on the first (also active) workspace; none on the second.
+        app.workspaces[0].accent_color = Some("blue".to_string());
         app.active = Some(0);
-        app.selected = 0;
+        app.selected = 1;
         app.mode = Mode::Terminal;
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
@@ -889,17 +890,14 @@ mod tests {
         let buffer = terminal.backend().buffer();
 
         let (ws_area, _, _) = collapsed_sidebar_sections(app.view.sidebar_rect);
-        let accent = app.workspace_accent_color(0).expect("workspace 0 has blue accent");
 
-        // Column 0 (the gutter) should have the accent background color.
-        let gutter_x = ws_area.x;
-        let gutter_cell = &buffer[(gutter_x, ws_area.y)];
-        assert_eq!(
-            gutter_cell.style().bg,
-            Some(accent),
-            "gutter column (x={}) should have accent background for accentuated workspace",
-            gutter_x
-        );
+        // Row 0: accented + active. Accent wins over the active highlight in the gutter.
+        let gutter0 = buffer[(ws_area.x, ws_area.y)].style();
+        assert_eq!(gutter0.bg, Some(app.palette.blue));
+
+        // Row 1: no accent -> gutter is not painted with an accent color.
+        let gutter1 = buffer[(ws_area.x, ws_area.y + 1)].style();
+        assert_ne!(gutter1.bg, Some(app.palette.blue));
     }
 
     #[test]
@@ -931,9 +929,9 @@ mod tests {
         let line1 = buffer_row_text(buffer, card, card.y);
         let line2 = buffer_row_text(buffer, card, card.y + 1);
 
-        assert!(line1.starts_with(" · one"));
+        assert!(line1.starts_with("  · one"));
         assert!(!line1.contains("1 one"));
-        assert_eq!(line2, "   main");
+        assert_eq!(line2, "    main");
 
         std::fs::remove_dir_all(repo).ok();
     }
