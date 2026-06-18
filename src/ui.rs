@@ -93,7 +93,7 @@ use crate::app::state::ViewLayout;
 use crate::app::{AppState, Mode};
 use crate::terminal::TerminalRuntimeRegistry;
 
-const COLLAPSED_WIDTH: u16 = 4; // num + space + dot + separator
+const COLLAPSED_WIDTH: u16 = 5; // stripe + num + space + dot + separator
 
 // Braille spinner frames — smooth rotation
 const SPINNERS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -813,6 +813,34 @@ mod tests {
         let active_style = buffer[(ws_area.x, active_row)].style();
 
         assert_eq!(active_style.bg, Some(app.palette.surface_dim));
+    }
+
+    #[test]
+    fn collapsed_sidebar_reserves_left_gutter_before_number() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.sidebar_collapsed = true;
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+
+        // Collapsed bar is now 5 columns wide.
+        assert_eq!(app.view.sidebar_rect.width, 5);
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let (ws_area, _, _) = collapsed_sidebar_sections(app.view.sidebar_rect);
+        // Column 0 is a blank gutter; the "1" digit sits one column right.
+        let row0 = buffer_row_text(buffer, ws_area, ws_area.y);
+        assert!(
+            row0.starts_with(" 1"),
+            "expected a leading gutter then the number, got {row0:?}"
+        );
     }
 
     #[test]

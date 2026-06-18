@@ -694,7 +694,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
                 Span::styled(" ", row_style),
                 Span::styled(icon, icon_style),
             ])),
-            Rect::new(ws_area.x, y, ws_area.width, 1),
+            Rect::new(ws_area.x + 1, y, ws_area.width.saturating_sub(1), 1),
         );
     }
 
@@ -737,7 +737,12 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
                             Span::styled(" ", pane_style),
                             Span::styled(icon, icon_style),
                         ])),
-                        Rect::new(detail_content_area.x, y, detail_content_area.width, 1),
+                        Rect::new(
+                            detail_content_area.x + 1,
+                            y,
+                            detail_content_area.width.saturating_sub(1),
+                            1,
+                        ),
                     );
                 }
             }
