@@ -1105,10 +1105,7 @@ fn install_claude_into_dirs_installs_present_and_warns_missing() {
     let missing = base.join("nope-not-here"); // intentionally not created
     let result = super::targets::install_claude_into_dirs(
         default.clone(),
-        &[
-            present.display().to_string(),
-            missing.display().to_string(),
-        ],
+        &[present.display().to_string(), missing.display().to_string()],
     )
     .unwrap();
     // default + present installed; missing produced a warning
@@ -1136,10 +1133,7 @@ fn uninstall_claude_from_dirs_warns_missing() {
     let missing = base.join("nope-not-here"); // intentionally not created
     let summary = super::targets::uninstall_claude_from_dirs(
         default.clone(),
-        &[
-            present.display().to_string(),
-            missing.display().to_string(),
-        ],
+        &[present.display().to_string(), missing.display().to_string()],
     )
     .unwrap();
     // default + present processed; missing produced a warning

@@ -1750,9 +1750,15 @@ commands = ["whatever"]
         assert!(entries.contains(&("claude-xebia".to_string(), crate::detect::Agent::Claude)));
         assert!(entries.contains(&("claude-mtv".to_string(), crate::detect::Agent::Claude)));
         // blank command dropped
-        assert_eq!(entries.iter().filter(|(c, _)| c.trim().is_empty()).count(), 0);
+        assert_eq!(
+            entries.iter().filter(|(c, _)| c.trim().is_empty()).count(),
+            0
+        );
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("notanagent"));
-        assert_eq!(cfg.agents.config_dirs_for("claude"), vec!["~/.claude-xebia".to_string()]);
+        assert_eq!(
+            cfg.agents.config_dirs_for("claude"),
+            vec!["~/.claude-xebia".to_string()]
+        );
     }
 }

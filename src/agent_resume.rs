@@ -574,8 +574,13 @@ mod tests {
     #[test]
     fn ids_are_data_not_shell_text() {
         let id = "abc; rm -rf /";
-        let codex_plan =
-            plan("herdr:codex", "codex", &AgentSessionRef::id(id).unwrap(), None).unwrap();
+        let codex_plan = plan(
+            "herdr:codex",
+            "codex",
+            &AgentSessionRef::id(id).unwrap(),
+            None,
+        )
+        .unwrap();
         assert_eq!(codex_plan.argv, vec!["codex", "resume", id]);
 
         let copilot_plan = plan(
@@ -587,8 +592,13 @@ mod tests {
         .unwrap();
         assert_eq!(copilot_plan.argv, vec!["copilot", "--resume=abc; rm -rf /"]);
 
-        let devin_plan =
-            plan("herdr:devin", "devin", &AgentSessionRef::id(id).unwrap(), None).unwrap();
+        let devin_plan = plan(
+            "herdr:devin",
+            "devin",
+            &AgentSessionRef::id(id).unwrap(),
+            None,
+        )
+        .unwrap();
         assert_eq!(devin_plan.argv, vec!["devin", "--resume", id]);
     }
 
@@ -675,10 +685,19 @@ mod tests {
     fn plan_uses_command_override_for_argv0() {
         let session = AgentSessionRef::id("xebia-session").unwrap();
         let result = plan("herdr:claude", "claude", &session, Some("claude-xebia")).unwrap();
-        assert_eq!(result.argv, vec!["claude-xebia", "--resume", "xebia-session"]);
+        assert_eq!(
+            result.argv,
+            vec!["claude-xebia", "--resume", "xebia-session"]
+        );
 
         // invalid override (path separator) falls back to the default binary
-        let result = plan("herdr:claude", "claude", &session, Some("/usr/bin/claude-xebia")).unwrap();
+        let result = plan(
+            "herdr:claude",
+            "claude",
+            &session,
+            Some("/usr/bin/claude-xebia"),
+        )
+        .unwrap();
         assert_eq!(result.argv, vec!["claude", "--resume", "xebia-session"]);
 
         // no override preserves existing behavior

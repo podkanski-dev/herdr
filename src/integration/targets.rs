@@ -22,13 +22,12 @@ use super::file_ops::{
 };
 use super::types::{
     ClaudeInstallPaths, ClaudeInstallResult, ClaudeUninstallResult, ClaudeUninstallSummary,
-    CodexInstallPaths, CodexUninstallResult,
-    CopilotInstallPaths, CopilotUninstallResult, CursorInstallPaths, CursorUninstallResult,
-    DevinInstallPaths, DevinUninstallResult, DroidInstallPaths, DroidUninstallResult,
-    HermesInstallPaths, HermesUninstallResult, KiloInstallPaths, KiloUninstallResult,
-    KimiInstallPaths, KimiUninstallResult, OmpInstallPaths, OmpUninstallResult,
-    OpenCodeInstallPaths, OpenCodeUninstallResult, PiUninstallResult, QodercliInstallPaths,
-    QodercliUninstallResult,
+    CodexInstallPaths, CodexUninstallResult, CopilotInstallPaths, CopilotUninstallResult,
+    CursorInstallPaths, CursorUninstallResult, DevinInstallPaths, DevinUninstallResult,
+    DroidInstallPaths, DroidUninstallResult, HermesInstallPaths, HermesUninstallResult,
+    KiloInstallPaths, KiloUninstallResult, KimiInstallPaths, KimiUninstallResult, OmpInstallPaths,
+    OmpUninstallResult, OpenCodeInstallPaths, OpenCodeUninstallResult, PiUninstallResult,
+    QodercliInstallPaths, QodercliUninstallResult,
 };
 use super::{
     CLAUDE_HOOK_ASSET, CLAUDE_HOOK_INSTALL_NAME, CODEX_HOOK_ASSET, CODEX_HOOK_INSTALL_NAME,
@@ -183,8 +182,7 @@ pub(crate) fn install_claude_into_dirs(
     let mut seen: Vec<PathBuf> = vec![default_dir];
     let mut warnings = Vec::new();
     for raw in extra {
-        let dir = expand_tilde_path(PathBuf::from(raw))
-            .unwrap_or_else(|_| PathBuf::from(raw));
+        let dir = expand_tilde_path(PathBuf::from(raw)).unwrap_or_else(|_| PathBuf::from(raw));
         if seen.iter().any(|existing| existing == &dir) {
             continue; // dedupe, including against the default dir
         }
@@ -195,7 +193,10 @@ pub(crate) fn install_claude_into_dirs(
         }
         installed.push(install_claude_into(&dir)?);
     }
-    Ok(ClaudeInstallResult { installed, warnings })
+    Ok(ClaudeInstallResult {
+        installed,
+        warnings,
+    })
 }
 
 pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
@@ -656,8 +657,7 @@ pub(crate) fn uninstall_claude_from_dirs(
     let mut seen: Vec<PathBuf> = vec![default_dir];
     let mut warnings = Vec::new();
     for raw in extra {
-        let dir = expand_tilde_path(PathBuf::from(raw))
-            .unwrap_or_else(|_| PathBuf::from(raw));
+        let dir = expand_tilde_path(PathBuf::from(raw)).unwrap_or_else(|_| PathBuf::from(raw));
         if seen.iter().any(|existing| existing == &dir) {
             continue; // dedupe, including against the default dir
         }
@@ -673,7 +673,10 @@ pub(crate) fn uninstall_claude_from_dirs(
 
 pub(crate) fn uninstall_claude() -> io::Result<ClaudeUninstallSummary> {
     let default_dir = claude_dir()?;
-    let extra = crate::config::Config::load().config.agents.config_dirs_for("claude");
+    let extra = crate::config::Config::load()
+        .config
+        .agents
+        .config_dirs_for("claude");
     uninstall_claude_from_dirs(default_dir, &extra)
 }
 
