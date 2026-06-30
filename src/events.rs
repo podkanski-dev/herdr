@@ -154,4 +154,9 @@ pub enum AppEvent {
     WorktreeAddFinished(Box<WorktreeAddResult>),
     /// Background `git worktree remove` completed.
     WorktreeRemoveFinished(Box<WorktreeRemoveResult>),
+    /// The foreground command name backing a pane's agent was detected.
+    AgentCommandDetected {
+        pane_id: PaneId,
+        command: Option<String>,
+    },
 }

@@ -2459,6 +2459,13 @@ impl AppState {
                 })
                 .into_iter()
                 .collect(),
+            AppEvent::AgentCommandDetected { pane_id, command } => self
+                .update_terminal_state(pane_id, |terminal| {
+                    terminal.set_detected_command(command);
+                    None
+                })
+                .into_iter()
+                .collect(),
             AppEvent::HookMetadataReported {
                 pane_id,
                 source,

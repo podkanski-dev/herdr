@@ -82,6 +82,7 @@ pub struct TerminalState {
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
     pub manual_label: Option<String>,
     pub agent_name: Option<String>,
+    detected_command: Option<String>,
     hook_report_sequences: HashMap<String, u64>,
     suppressed_full_lifecycle_hook_reports: HashMap<String, SuppressedFullLifecycleHookReport>,
     stale_full_lifecycle_hook_sessions: HashMap<String, Vec<StaleFullLifecycleHookSession>>,
@@ -109,6 +110,7 @@ impl TerminalState {
             persisted_agent_session: None,
             manual_label: None,
             agent_name: None,
+            detected_command: None,
             hook_report_sequences: HashMap::new(),
             suppressed_full_lifecycle_hook_reports: HashMap::new(),
             stale_full_lifecycle_hook_sessions: HashMap::new(),
@@ -880,6 +882,10 @@ impl TerminalState {
         )
     }
 
+    pub fn set_detected_command(&mut self, command: Option<String>) {
+        self.detected_command = command.filter(|command| !command.trim().is_empty());
+    }
+
     pub fn set_persisted_agent_session(
         &mut self,
         session: crate::agent_resume::PersistedAgentSession,
@@ -956,7 +962,7 @@ impl TerminalState {
             source,
             agent: agent_label,
             session_ref,
-            command: None,
+            command: self.detected_command.clone(),
         });
         let current_session = self.current_session_identity_for_persistence();
         Some(TerminalStateMutation {
@@ -4002,5 +4008,20 @@ mod tests {
             terminal.hook_authority.as_ref().unwrap().source,
             "custom:pi"
         );
+    }
+
+    #[test]
+    fn session_report_captures_detected_command() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_command(Some("claude-xebia".into()));
+        let _ = terminal.set_agent_session_ref_for_session_start(
+            "herdr:claude".into(),
+            "claude".into(),
+            crate::agent_resume::AgentSessionRef::id("xebia-session"),
+            Some(1),
+            Some("startup".into()),
+        );
+        let session = terminal.persisted_agent_session.as_ref().expect("session");
+        assert_eq!(session.command.as_deref(), Some("claude-xebia"));
     }
 }
