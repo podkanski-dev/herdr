@@ -7,7 +7,6 @@ mod agent_commands;
 pub mod manifest;
 pub mod manifest_update;
 
-#[allow(unused_imports)] // consumed by the config-loading layer in a later task
 pub use agent_commands::set_agent_command_registry;
 
 /// The detected state of a terminal pane.

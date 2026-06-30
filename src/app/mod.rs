@@ -1324,6 +1324,12 @@ impl App {
         let invalid_section =
             |section: &str| invalid_sections.iter().any(|invalid| invalid == section);
 
+        if !invalid_section("agents") {
+            let (agent_commands, agent_warnings) = config.agents.command_entries();
+            crate::detect::set_agent_command_registry(agent_commands);
+            diagnostics.extend(agent_warnings);
+        }
+
         if !invalid_section("keys") {
             match config.live_keybinds_with_diagnostics() {
                 Ok((live, keybind_diagnostics)) => {
@@ -4629,6 +4635,26 @@ last_pane = "prefix+tab"
         app.route_client_input(b"\x1b]".to_vec());
 
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn applying_config_populates_agent_command_registry() {
+        let mut config = crate::config::Config::default();
+        config.agents.entries.insert(
+            "claude".to_string(),
+            crate::config::model::AgentEntryConfig {
+                commands: vec!["claude-xebia".to_string()],
+                config_dirs: vec![],
+            },
+        );
+        let mut app = test_app();
+        let _ = app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(
+            crate::detect::identify_agent("claude-xebia"),
+            Some(crate::detect::Agent::Claude)
+        );
+        // reset global for other tests
+        crate::detect::set_agent_command_registry([]);
     }
 
     #[test]

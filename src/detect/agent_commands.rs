@@ -13,7 +13,6 @@ fn registry() -> &'static RwLock<HashMap<String, Agent>> {
 /// normalized the same way `identify_agent` normalizes its input; blank names
 /// are dropped. Built-in agent names always take precedence in `identify_agent`,
 /// so a registry entry that collides with a built-in name has no effect.
-#[allow(dead_code)] // consumed by the config-loading layer in a later task
 pub fn set_agent_command_registry(entries: impl IntoIterator<Item = (String, Agent)>) {
     let map: HashMap<String, Agent> = entries
         .into_iter()
