@@ -77,10 +77,14 @@ impl Version {
         if parts.len() != 3 {
             return None;
         }
+        // Tolerate a semver pre-release/build suffix on the patch component
+        // (e.g. "1-kp", "1-preview.5", "1+build") so custom-suffixed versions
+        // like 0.7.1-kp parse instead of panicking in Version::current().
+        let patch = parts[2].split(['-', '+']).next().unwrap_or(parts[2]);
         Some(Self {
             major: parts[0].parse().ok()?,
             minor: parts[1].parse().ok()?,
-            patch: parts[2].parse().ok()?,
+            patch: patch.parse().ok()?,
         })
     }
 
