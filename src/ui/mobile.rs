@@ -636,7 +636,7 @@ fn render_mobile_switcher_content(
         );
         // Accent stripe on the left edge, mirroring the desktop sidebar.
         // Painted after the row so it stays visible on selected/active rows.
-        if let Some(accent) = app.workspace_accent_color(idx) {
+        if let Some(accent) = app.workspace_accent_color(*ws_idx) {
             for offset in 0..2 {
                 if let Some(y) = visible_y(viewport, app.mobile_switcher_scroll, doc_y + offset) {
                     frame.buffer_mut()[(content.x, y)].set_style(Style::default().bg(accent));

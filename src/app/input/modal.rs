@@ -1308,6 +1308,11 @@ impl App {
             (
                 ContextMenuKind::Workspace { ws_idx }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. },
+                Some("Set color"),
+            ) => open_choose_workspace_color(&mut self.state, &self.terminal_runtimes, ws_idx),
+            (
+                ContextMenuKind::Workspace { ws_idx }
+                | ContextMenuKind::GitWorkspace { ws_idx, .. },
                 Some("Close" | "Close group"),
             ) => {
                 self.state.selected = ws_idx;
