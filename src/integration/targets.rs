@@ -165,15 +165,26 @@ pub(crate) fn install_claude_into(dir: &Path) -> io::Result<ClaudeInstallPaths> 
 
 pub(crate) fn install_claude() -> io::Result<ClaudeInstallResult> {
     let default_dir = claude_dir()?;
+    let loaded = crate::config::Config::load();
+    let extra = loaded.config.agents.config_dirs_for("claude");
+    install_claude_into_dirs(default_dir, &extra)
+}
+
+/// `default_dir` is mandatory (hard error if missing). `extra` dirs are
+/// tilde-expanded, deduped (including against the default), and warn-skipped
+/// when absent.
+pub(crate) fn install_claude_into_dirs(
+    default_dir: PathBuf,
+    extra: &[String],
+) -> io::Result<ClaudeInstallResult> {
     // default dir missing => hard error (preserves prior behavior + the
     // "claude directory not found" test)
     let mut installed = vec![install_claude_into(&default_dir)?];
-    let mut seen: Vec<PathBuf> = vec![default_dir.clone()];
+    let mut seen: Vec<PathBuf> = vec![default_dir];
     let mut warnings = Vec::new();
-    let loaded = crate::config::Config::load();
-    for raw in loaded.config.agents.config_dirs_for("claude") {
-        let dir = expand_tilde_path(PathBuf::from(&raw))
-            .unwrap_or_else(|_| PathBuf::from(&raw));
+    for raw in extra {
+        let dir = expand_tilde_path(PathBuf::from(raw))
+            .unwrap_or_else(|_| PathBuf::from(raw));
         if seen.iter().any(|existing| existing == &dir) {
             continue; // dedupe, including against the default dir
         }

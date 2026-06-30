@@ -1084,20 +1084,35 @@ fn uninstall_claude_removes_herdr_hooks_and_preserves_others() {
 
 #[test]
 fn install_claude_into_targets_explicit_dir() {
-    let tmp_base = std::env::temp_dir().join(format!(
-        "herdr-claude-into-test-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let dir = tmp_base.join("acct");
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("acct");
     std::fs::create_dir_all(&dir).unwrap();
     let paths = super::targets::install_claude_into(&dir).unwrap();
     assert!(paths.hook_path.starts_with(&dir));
     assert!(dir.join("settings.json").is_file());
-    let _ = std::fs::remove_dir_all(&tmp_base);
+}
+
+#[test]
+fn install_claude_into_dirs_installs_present_and_warns_missing() {
+    let default = tempfile::tempdir().unwrap();
+    let present = tempfile::tempdir().unwrap();
+    let missing = present.path().join("nope-not-here");
+    let result = super::targets::install_claude_into_dirs(
+        default.path().to_path_buf(),
+        &[
+            present.path().display().to_string(),
+            missing.display().to_string(),
+        ],
+    )
+    .unwrap();
+    // default + present installed; missing produced a warning
+    assert_eq!(result.installed.len(), 2);
+    assert!(result
+        .installed
+        .iter()
+        .any(|p| p.hook_path.starts_with(present.path())));
+    assert_eq!(result.warnings.len(), 1);
+    assert!(result.warnings[0].contains("nope-not-here"));
 }
 
 #[test]
