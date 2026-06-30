@@ -756,6 +756,7 @@ pub enum Mode {
     RenameWorkspace,
     RenameTab,
     RenamePane,
+    ChooseWorkspaceColor,
     NewLinkedWorktree,
     OpenExistingWorktree,
     ConfirmRemoveWorktree,
@@ -999,6 +1000,63 @@ pub struct SettingsState {
     pub original_theme: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Workspace accent color picker
+// ---------------------------------------------------------------------------
+
+/// Which choice is active in the workspace color picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorPickerSelection {
+    /// Clear the color.
+    Clear,
+    /// A curated swatch by index into `ColorPickerState::swatches`.
+    Swatch(usize),
+    /// The custom hex input field.
+    Custom,
+}
+
+/// State for the workspace color picker modal.
+#[derive(Debug, Clone)]
+pub struct ColorPickerState {
+    pub ws_idx: usize,
+    /// (name, color) curated swatches, in display order.
+    pub swatches: Vec<(String, Color)>,
+    pub selected: ColorPickerSelection,
+    pub hex_input: String,
+    pub error: Option<String>,
+}
+
+impl ColorPickerState {
+    /// Resolve the current selection to a config value:
+    /// `Ok(None)` clears, `Ok(Some(v))` sets, `Err` is an invalid custom hex.
+    pub fn resolved_value(&self) -> Result<Option<String>, String> {
+        match self.selected {
+            ColorPickerSelection::Clear => Ok(None),
+            ColorPickerSelection::Swatch(i) => Ok(self.swatches.get(i).map(|(n, _)| n.clone())),
+            ColorPickerSelection::Custom => {
+                let hex = self.hex_input.trim();
+                match crate::config::try_parse_color(hex) {
+                    Some(_) => Ok(Some(hex.to_string())),
+                    None => Err("invalid color".to_string()),
+                }
+            }
+        }
+    }
+}
+
+/// Curated accent swatches drawn from the active palette.
+pub fn workspace_color_swatches(palette: &Palette) -> Vec<(String, Color)> {
+    vec![
+        ("red".to_string(), palette.red),
+        ("peach".to_string(), palette.peach),
+        ("yellow".to_string(), palette.yellow),
+        ("green".to_string(), palette.green),
+        ("teal".to_string(), palette.teal),
+        ("blue".to_string(), palette.blue),
+        ("mauve".to_string(), palette.mauve),
+    ]
+}
+
 pub(crate) enum DragTarget {
     WorkspaceReorder {
         source_ws_idx: usize,
@@ -1091,16 +1149,27 @@ pub struct ContextMenuState {
 impl ContextMenuState {
     pub fn items(&self) -> &'static [&'static str] {
         match self.kind {
-            ContextMenuKind::Workspace { .. } => &["Rename", "Close"],
+            ContextMenuKind::Workspace { .. } => &["Rename", "Set color", "Close"],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
-            } => &["Rename", "Close", "New worktree", "Open worktree..."],
+            } => &[
+                "Rename",
+                "Set color",
+                "Close",
+                "New worktree",
+                "Open worktree...",
+            ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: true,
                 ..
-            } => &["Rename", "Close", "Delete worktree checkout..."],
+            } => &[
+                "Rename",
+                "Set color",
+                "Close",
+                "Delete worktree checkout...",
+            ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: true,
@@ -1108,6 +1177,7 @@ impl ContextMenuState {
                 ..
             } => &[
                 "Rename",
+                "Set color",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
@@ -1120,6 +1190,7 @@ impl ContextMenuState {
                 ..
             } => &[
                 "Rename",
+                "Set color",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
@@ -1422,6 +1493,10 @@ pub struct AppState {
     pub(crate) plugin_command_logs: Vec<crate::api::schema::PluginCommandLogInfo>,
     pub(crate) next_plugin_command_log_id: u64,
     pub(crate) plugin_commands_in_flight: usize,
+    /// Runtime per-workspace accent colors, keyed by identity_cwd → config value.
+    pub workspace_colors: std::collections::HashMap<std::path::PathBuf, String>,
+    /// Active workspace color picker, when in `Mode::ChooseWorkspaceColor`.
+    pub color_picker: Option<ColorPickerState>,
     /// Highlight state for the bottom-right global launcher menu.
     pub global_menu: MenuListState,
     /// Resolved host terminal default colors for theming embedded panes.
@@ -1444,6 +1519,37 @@ impl AppState {
 
     pub fn sound_enabled(&self) -> bool {
         self.sound.enabled
+    }
+
+    /// Resolve a workspace's accent color using two-layer lookup:
+    /// 1. Per-workspace override (`ws.accent_color`) takes precedence.
+    /// 2. Directory default from config, keyed by `identity_cwd`, as fallback.
+    ///
+    /// Curated swatch names (e.g. "blue", "mauve") resolve against the active
+    /// palette so they stay theme-accurate and match what the picker shows.
+    /// Everything else (hex like "#89b4fa", standard names) parses directly.
+    pub fn workspace_accent_color(&self, ws_idx: usize) -> Option<Color> {
+        let ws = self.workspaces.get(ws_idx)?;
+        // Layer 2: explicit per-workspace override (session state).
+        // Layer 1: directory default from config, keyed by identity_cwd.
+        let raw: &str = match ws.accent_color.as_deref() {
+            Some(value) => value,
+            None => self.workspace_colors.get(&ws.identity_cwd)?.as_str(),
+        };
+        self.resolve_accent_value(raw)
+    }
+
+    /// Resolve a stored accent value to a `Color`. Curated swatch names
+    /// (e.g. "blue", "mauve") resolve against the active palette so they stay
+    /// theme-accurate; everything else (hex, standard names) parses directly.
+    fn resolve_accent_value(&self, raw: &str) -> Option<Color> {
+        if let Some((_, color)) = workspace_color_swatches(&self.palette)
+            .into_iter()
+            .find(|(name, _)| name == raw)
+        {
+            return Some(color);
+        }
+        crate::config::try_parse_color(raw)
     }
 
     pub fn toast_delivery(&self) -> ToastDelivery {
@@ -1775,6 +1881,8 @@ impl AppState {
             host_terminal_theme: TerminalTheme::default(),
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
+            workspace_colors: std::collections::HashMap::new(),
+            color_picker: None,
         }
     }
 
@@ -2215,7 +2323,12 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "Delete worktree checkout..."]
+            &[
+                "Rename",
+                "Set color",
+                "Close",
+                "Delete worktree checkout..."
+            ]
         );
     }
 
@@ -2235,7 +2348,13 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "New worktree", "Open worktree..."]
+            &[
+                "Rename",
+                "Set color",
+                "Close",
+                "New worktree",
+                "Open worktree..."
+            ]
         );
     }
 
@@ -2257,11 +2376,119 @@ mod tests {
             menu.items(),
             &[
                 "Rename",
+                "Set color",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
                 "Collapse"
             ]
         );
+    }
+
+    #[test]
+    fn workspace_context_menu_has_set_color() {
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(menu.items().contains(&"Set color"));
+    }
+
+    #[test]
+    fn workspace_accent_color_resolves_swatch_name_to_palette() {
+        let mut state = AppState::test_new();
+        let ws = crate::workspace::Workspace::test_new("test");
+        state.workspaces.push(ws);
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        // A curated swatch name resolves to the active palette's themed color,
+        // not the base ratatui color — including palette-only names like mauve.
+        state
+            .workspace_colors
+            .insert(cwd.clone(), "blue".to_string());
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.blue));
+        state.workspace_colors.insert(cwd, "mauve".to_string());
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.mauve));
+    }
+
+    #[test]
+    fn workspace_accent_color_resolves_custom_hex() {
+        let mut state = AppState::test_new();
+        let ws = crate::workspace::Workspace::test_new("test");
+        state.workspaces.push(ws);
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        state.workspace_colors.insert(cwd, "#abcdef".to_string());
+        assert_eq!(
+            state.workspace_accent_color(0),
+            Some(ratatui::style::Color::Rgb(0xab, 0xcd, 0xef))
+        );
+    }
+
+    #[test]
+    fn workspace_accent_color_none_when_unset_or_invalid() {
+        let mut state = AppState::test_new();
+        let ws = crate::workspace::Workspace::test_new("test");
+        state.workspaces.push(ws);
+        assert_eq!(state.workspace_accent_color(0), None);
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        state.workspace_colors.insert(cwd, "garbage".to_string());
+        assert_eq!(state.workspace_accent_color(0), None);
+    }
+
+    #[test]
+    fn accent_color_override_beats_directory_default() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("a"));
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        // Directory default = red for this cwd.
+        state.workspace_colors.insert(cwd, "red".to_string());
+        // Per-workspace override = blue.
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.blue));
+    }
+
+    #[test]
+    fn accent_color_falls_back_to_directory_default() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("a"));
+        let cwd = state.workspaces[0].identity_cwd.clone();
+        state.workspace_colors.insert(cwd, "green".to_string());
+        // No per-workspace override -> directory default applies.
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.green));
+    }
+
+    #[test]
+    fn accent_color_override_is_per_workspace_for_same_cwd() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("a"));
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("b"));
+        // Force both workspaces to share the same identity_cwd.
+        let shared = state.workspaces[0].identity_cwd.clone();
+        state.workspaces[1].identity_cwd = shared;
+        // Only the first workspace gets an override.
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.blue));
+        assert_eq!(state.workspace_accent_color(1), None);
+    }
+
+    #[test]
+    fn workspace_color_swatches_uses_palette() {
+        let palette = Palette::from_name("catppuccin").unwrap();
+        let swatches = workspace_color_swatches(&palette);
+        let names: Vec<&str> = swatches.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["red", "peach", "yellow", "green", "teal", "blue", "mauve"]
+        );
+        assert_eq!(swatches[5].1, palette.blue);
     }
 }

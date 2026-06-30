@@ -5,6 +5,7 @@ use ratatui::{
     Frame,
 };
 
+pub(crate) mod color_picker;
 mod dialogs;
 mod keybind_help;
 mod menus;
@@ -92,7 +93,7 @@ use crate::app::state::ViewLayout;
 use crate::app::{AppState, Mode};
 use crate::terminal::TerminalRuntimeRegistry;
 
-const COLLAPSED_WIDTH: u16 = 4; // num + space + dot + separator
+const COLLAPSED_WIDTH: u16 = 6; // stripe + gap + num + space + dot + separator
 
 // Braille spinner frames — smooth rotation
 const SPINNERS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -431,6 +432,7 @@ pub fn render_with_runtime_registry(
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
         Mode::Terminal => {}
+        Mode::ChooseWorkspaceColor => color_picker::render_color_picker(app, frame, frame.area()),
     }
 }
 
@@ -841,6 +843,64 @@ mod tests {
     }
 
     #[test]
+    fn collapsed_sidebar_reserves_left_gutter_before_number() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.sidebar_collapsed = true;
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+
+        // Collapsed bar is now 6 columns wide.
+        assert_eq!(app.view.sidebar_rect.width, 6);
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let (ws_area, _, _) = collapsed_sidebar_sections(app.view.sidebar_rect);
+        // Column 0 is the stripe gutter, column 1 is a blank gap; the "1"
+        // digit sits two columns right.
+        let row0 = buffer_row_text(buffer, ws_area, ws_area.y);
+        assert!(
+            row0.starts_with("  1"),
+            "expected a stripe gutter and gap before the number, got {row0:?}"
+        );
+    }
+
+    #[test]
+    fn collapsed_sidebar_paints_accent_stripe_in_gutter() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.sidebar_collapsed = true;
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        // Accent on the first (also active) workspace; none on the second.
+        app.workspaces[0].accent_color = Some("blue".to_string());
+        app.active = Some(0);
+        app.selected = 1;
+        app.mode = Mode::Terminal;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let (ws_area, _, _) = collapsed_sidebar_sections(app.view.sidebar_rect);
+
+        // Row 0: accented + active. Accent wins over the active highlight in the gutter.
+        let gutter0 = buffer[(ws_area.x, ws_area.y)].style();
+        assert_eq!(gutter0.bg, Some(app.palette.blue));
+
+        // Row 1: no accent -> gutter is not painted with an accent color.
+        let gutter1 = buffer[(ws_area.x, ws_area.y + 1)].style();
+        assert_ne!(gutter1.bg, Some(app.palette.blue));
+    }
+
+    #[test]
     fn expanded_sidebar_workspace_rows_show_state_before_name_without_numbers() {
         let mut app = crate::app::state::AppState::test_new();
         let mut ws = Workspace::test_new("one");
@@ -869,9 +929,9 @@ mod tests {
         let line1 = buffer_row_text(buffer, card, card.y);
         let line2 = buffer_row_text(buffer, card, card.y + 1);
 
-        assert!(line1.starts_with(" · one"));
+        assert!(line1.starts_with("  · one"));
         assert!(!line1.contains("1 one"));
-        assert_eq!(line2, "   main");
+        assert_eq!(line2, "    main");
 
         std::fs::remove_dir_all(repo).ok();
     }

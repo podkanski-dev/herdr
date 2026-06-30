@@ -147,6 +147,10 @@ pub struct Workspace {
     pub id: String,
     /// User-provided override. If set, auto-derived identity stops updating.
     pub custom_name: Option<String>,
+    /// Per-workspace accent color override (swatch name, hex, or color name).
+    /// Set via the color picker; takes precedence over the directory default.
+    /// `None` means inherit the directory default (or no accent).
+    pub accent_color: Option<String>,
     /// Fallback workspace identity source for tests, old snapshots, or missing runtimes.
     pub identity_cwd: PathBuf,
     /// Cached current git branch for the workspace repo.
@@ -211,6 +215,7 @@ impl Workspace {
         Self {
             id,
             custom_name: label,
+            accent_color: None,
             identity_cwd: identity_cwd.clone(),
             cached_git_branch: git_branch(&identity_cwd),
             cached_git_ahead_behind: None,
@@ -392,6 +397,7 @@ impl Workspace {
             Self {
                 id,
                 custom_name: None,
+                accent_color: None,
                 identity_cwd: initial_cwd.clone(),
                 cached_git_branch: git_branch(&initial_cwd),
                 cached_git_ahead_behind: None,
@@ -1199,6 +1205,7 @@ impl Workspace {
         Self {
             id: generate_workspace_id(),
             custom_name: Some(name.to_string()),
+            accent_color: None,
             identity_cwd: identity_cwd.clone(),
             cached_git_branch: git_branch(&identity_cwd),
             cached_git_ahead_behind: None,
@@ -1603,5 +1610,11 @@ mod tests {
         assert_eq!(ws.tabs[2].root_pane, moved_root);
         assert_eq!(ws.tabs[ws.active_tab].root_pane, active_root);
         ws.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn new_workspace_has_no_accent_color_by_default() {
+        let ws = Workspace::test_new("plain");
+        assert!(ws.accent_color.is_none());
     }
 }

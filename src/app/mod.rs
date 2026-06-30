@@ -223,6 +223,28 @@ fn agent_panel_sort_from_config(
     }
 }
 
+/// Build the runtime workspace-color map from config, dropping unparseable
+/// entries. Returns the map and a list of diagnostics for skipped entries.
+fn workspace_colors_from_config(
+    config: &std::collections::BTreeMap<String, String>,
+) -> (
+    std::collections::HashMap<std::path::PathBuf, String>,
+    Vec<String>,
+) {
+    let mut map = std::collections::HashMap::new();
+    let mut diagnostics = Vec::new();
+    for (cwd, raw) in config {
+        if crate::config::try_parse_color(raw).is_some() {
+            map.insert(std::path::PathBuf::from(cwd), raw.clone());
+        } else {
+            diagnostics.push(format!(
+                "invalid workspace_colors entry for {cwd:?}: {raw:?}; ignored"
+            ));
+        }
+    }
+    (map, diagnostics)
+}
+
 /// Parse the configured agent name list into a deduplicated set of `Agent`
 /// values. Unknown agent names are silently dropped so a typo cannot disable
 /// other valid entries.
@@ -645,6 +667,8 @@ impl App {
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
+            workspace_colors: workspace_colors_from_config(&config.workspace_colors).0,
+            color_picker: None,
         };
 
         state.terminals = restored_terminals;
@@ -1449,6 +1473,12 @@ impl App {
             self.refresh_effective_app_theme();
         }
 
+        {
+            let (map, mut ws_color_diags) = workspace_colors_from_config(&config.workspace_colors);
+            self.state.workspace_colors = map;
+            diagnostics.append(&mut ws_color_diags);
+        }
+
         let status = if diagnostics.is_empty() {
             crate::config::ConfigReloadStatus::Applied
         } else {
@@ -1664,6 +1694,9 @@ impl App {
             }
             Mode::Terminal => {
                 // Should not be called in terminal mode.
+            }
+            Mode::ChooseWorkspaceColor => {
+                input::handle_choose_workspace_color_key(&mut self.state, key_event);
             }
         }
     }
@@ -2221,6 +2254,37 @@ mod tests {
     }
 
     #[test]
+    fn headless_color_picker_accepts_hex_typing() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app =
+            App::new(&Config::default(), true, None, api_rx, crate::api::EventHub::default());
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.color_picker = Some(state::ColorPickerState {
+            ws_idx: 0,
+            swatches: state::workspace_color_swatches(&app.state.palette),
+            selected: state::ColorPickerSelection::Clear,
+            hex_input: String::new(),
+            error: None,
+        });
+        app.state.mode = Mode::ChooseWorkspaceColor;
+
+        // The headless server path (not the interactive `handle_key` path) is
+        // what the client/server runtime uses. It must route picker keys to
+        // the handler, not drop them.
+        for c in ['#', 'a', 'b', 'c', 'd', 'e', 'f'] {
+            app.handle_non_terminal_key_headless(crate::input::TerminalKey::new(
+                KeyCode::Char(c),
+                KeyModifiers::empty(),
+            ));
+        }
+
+        let picker = app.state.color_picker.as_ref().expect("picker open");
+        assert_eq!(picker.hex_input, "#abcdef");
+    }
+
+    #[test]
     fn startup_uses_redraw_on_focus_gained_config() {
         let mut config = Config::default();
         config.ui.redraw_on_focus_gained = false;
@@ -2407,6 +2471,35 @@ mod tests {
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         restore_xdg_state_home(original_xdg_state_home);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn startup_loads_workspace_colors_from_config() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("startup-workspace-colors");
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut config = Config {
+            onboarding: Some(false),
+            ..Default::default()
+        };
+        config
+            .workspace_colors
+            .insert("/tmp/herdr-accent-test".to_string(), "blue".to_string());
+
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+
+        assert_eq!(
+            app.state
+                .workspace_colors
+                .get(std::path::Path::new("/tmp/herdr-accent-test"))
+                .map(String::as_str),
+            Some("blue")
+        );
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -4560,5 +4653,26 @@ last_pane = "prefix+tab"
             &input[events[1].start..events[1].start + events[1].len],
             b"a"
         );
+    }
+
+    #[test]
+    fn workspace_colors_from_config_keeps_valid_drops_invalid() {
+        let mut cfg = std::collections::BTreeMap::new();
+        cfg.insert("/home/me/a".to_string(), "blue".to_string());
+        cfg.insert("/home/me/b".to_string(), "#abcdef".to_string());
+        cfg.insert("/home/me/c".to_string(), "garbage".to_string());
+        let (map, diags) = workspace_colors_from_config(&cfg);
+        assert_eq!(
+            map.get(std::path::Path::new("/home/me/a"))
+                .map(String::as_str),
+            Some("blue")
+        );
+        assert_eq!(
+            map.get(std::path::Path::new("/home/me/b"))
+                .map(String::as_str),
+            Some("#abcdef")
+        );
+        assert!(!map.contains_key(std::path::Path::new("/home/me/c")));
+        assert_eq!(diags.len(), 1);
     }
 }

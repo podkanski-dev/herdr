@@ -325,6 +325,158 @@ pub(super) fn open_rename_workspace(
     state.mode = Mode::RenameWorkspace;
 }
 
+pub(super) fn open_choose_workspace_color(
+    state: &mut AppState,
+    _terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ws_idx: usize,
+) {
+    use crate::app::state::{workspace_color_swatches, ColorPickerSelection, ColorPickerState};
+    state.selected = ws_idx;
+    let swatches = workspace_color_swatches(&state.palette);
+
+    let current = state
+        .workspaces
+        .get(ws_idx)
+        .and_then(|ws| ws.accent_color.clone());
+    let (selected, hex_input) = match current {
+        None => (ColorPickerSelection::Clear, String::new()),
+        Some(value) => {
+            if let Some(i) = swatches.iter().position(|(name, _)| *name == value) {
+                (ColorPickerSelection::Swatch(i), String::new())
+            } else {
+                (ColorPickerSelection::Custom, value)
+            }
+        }
+    };
+
+    state.color_picker = Some(ColorPickerState {
+        ws_idx,
+        swatches,
+        selected,
+        hex_input,
+        error: None,
+    });
+    state.mode = Mode::ChooseWorkspaceColor;
+}
+
+pub(super) fn apply_workspace_color(state: &mut AppState) {
+    let Some(picker) = state.color_picker.as_ref() else {
+        leave_modal(state);
+        return;
+    };
+    let ws_idx = picker.ws_idx;
+    match picker.resolved_value() {
+        Ok(value) => {
+            if let Some(ws) = state.workspaces.get_mut(ws_idx) {
+                ws.accent_color = value;
+            }
+            state.mark_session_dirty();
+            state.color_picker = None;
+            leave_modal(state);
+        }
+        Err(message) => {
+            if let Some(picker) = state.color_picker.as_mut() {
+                picker.error = Some(message);
+            }
+        }
+    }
+}
+
+/// Cancel the color picker without persisting any change.
+pub(super) fn cancel_workspace_color(state: &mut AppState) {
+    state.color_picker = None;
+    leave_modal(state);
+}
+
+/// Linear order of selectable cells: Clear, then each swatch, then Custom.
+fn color_selection_index(
+    selection: crate::app::state::ColorPickerSelection,
+    swatch_count: usize,
+) -> usize {
+    use crate::app::state::ColorPickerSelection;
+    match selection {
+        ColorPickerSelection::Clear => 0,
+        ColorPickerSelection::Swatch(i) => 1 + i.min(swatch_count.saturating_sub(1)),
+        ColorPickerSelection::Custom => swatch_count + 1,
+    }
+}
+
+fn color_selection_from_index(
+    index: usize,
+    swatch_count: usize,
+) -> crate::app::state::ColorPickerSelection {
+    use crate::app::state::ColorPickerSelection;
+    if index == 0 {
+        ColorPickerSelection::Clear
+    } else if index <= swatch_count {
+        ColorPickerSelection::Swatch(index - 1)
+    } else {
+        ColorPickerSelection::Custom
+    }
+}
+
+/// Characters that begin/continue a custom hex entry.
+fn is_hex_input_char(c: char) -> bool {
+    c == '#' || c.is_ascii_hexdigit()
+}
+
+pub(crate) fn handle_choose_workspace_color_key(state: &mut AppState, key: KeyEvent) {
+    use crate::app::state::ColorPickerSelection;
+
+    if matches!(key.code, KeyCode::Esc) {
+        cancel_workspace_color(state);
+        return;
+    }
+    if matches!(key.code, KeyCode::Enter) {
+        apply_workspace_color(state);
+        return;
+    }
+
+    let Some(picker) = state.color_picker.as_mut() else {
+        leave_modal(state);
+        return;
+    };
+    let swatch_count = picker.swatches.len();
+    let last = swatch_count + 1;
+    let current = color_selection_index(picker.selected, swatch_count);
+
+    match key.code {
+        KeyCode::Left | KeyCode::Up | KeyCode::BackTab => {
+            picker.selected = color_selection_from_index(current.saturating_sub(1), swatch_count);
+            picker.error = None;
+        }
+        KeyCode::Right | KeyCode::Down | KeyCode::Tab => {
+            picker.selected = color_selection_from_index((current + 1).min(last), swatch_count);
+            picker.error = None;
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if matches!(picker.selected, ColorPickerSelection::Custom) {
+                picker.hex_input.clear();
+                picker.error = None;
+            }
+        }
+        KeyCode::Backspace if matches!(picker.selected, ColorPickerSelection::Custom) => {
+            picker.hex_input.pop();
+            picker.error = None;
+        }
+        KeyCode::Char(c) if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+            match picker.selected {
+                ColorPickerSelection::Custom => {
+                    picker.hex_input.push(c);
+                    picker.error = None;
+                }
+                _ if is_hex_input_char(c) => {
+                    picker.selected = ColorPickerSelection::Custom;
+                    picker.hex_input.push(c);
+                    picker.error = None;
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn open_rename_active_tab(state: &mut AppState, replace_on_type: bool) {
     state.creating_new_tab = false;
     state.requested_new_tab_name = None;
@@ -719,6 +871,12 @@ pub(super) fn apply_context_menu_action(
                 state.mark_session_dirty();
             }
             leave_modal(state);
+        }
+        (
+            ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            Some("Set color"),
+        ) => {
+            open_choose_workspace_color(state, terminal_runtimes, ws_idx);
         }
         (
             ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
@@ -1808,7 +1966,7 @@ mod tests {
         };
         let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
-        apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, 1);
+        apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, 2);
 
         assert_eq!(state.selected, 0);
         assert_eq!(state.mode, Mode::ConfirmClose);
@@ -1817,6 +1975,163 @@ mod tests {
 
         assert!(state.workspaces.is_empty());
         assert_eq!(state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn set_color_opens_picker() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("test"));
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        assert_eq!(state.mode, Mode::ChooseWorkspaceColor);
+        let picker = state.color_picker.as_ref().unwrap();
+        assert_eq!(picker.ws_idx, 0);
+        assert!(!picker.swatches.is_empty());
+    }
+
+    #[test]
+    fn applying_swatch_sets_workspace_override() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("test"));
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        if let Some(picker) = state.color_picker.as_mut() {
+            picker.selected = ColorPickerSelection::Swatch(5); // "blue"
+        }
+        state.session_dirty = false;
+        apply_workspace_color(&mut state);
+        assert_eq!(state.workspaces[0].accent_color.as_deref(), Some("blue"));
+        assert!(state.session_dirty);
+        assert_eq!(state.mode, Mode::Navigate);
+        assert!(state.color_picker.is_none());
+    }
+
+    #[test]
+    fn applying_none_clears_workspace_override() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("test"));
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        if let Some(picker) = state.color_picker.as_mut() {
+            picker.selected = ColorPickerSelection::Clear;
+        }
+        apply_workspace_color(&mut state);
+        assert!(state.workspaces[0].accent_color.is_none());
+        assert_eq!(state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn applying_invalid_hex_keeps_modal_open_with_error() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("test"));
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        if let Some(picker) = state.color_picker.as_mut() {
+            picker.selected = ColorPickerSelection::Custom;
+            picker.hex_input = "nope".to_string();
+        }
+        apply_workspace_color(&mut state);
+        assert_eq!(state.mode, Mode::ChooseWorkspaceColor);
+        assert!(state.workspaces[0].accent_color.is_none());
+        assert!(state.color_picker.as_ref().unwrap().error.is_some());
+    }
+
+    fn open_picker_with_workspace() -> AppState {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("test"));
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 0);
+        state
+    }
+
+    #[test]
+    fn picker_right_left_navigates_selection() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = open_picker_with_workspace();
+        // Starts on Clear (no stored color).
+        assert_eq!(
+            state.color_picker.as_ref().unwrap().selected,
+            ColorPickerSelection::Clear
+        );
+        handle_choose_workspace_color_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Right, KeyModifiers::empty()),
+        );
+        assert_eq!(
+            state.color_picker.as_ref().unwrap().selected,
+            ColorPickerSelection::Swatch(0)
+        );
+        handle_choose_workspace_color_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::empty()),
+        );
+        assert_eq!(
+            state.color_picker.as_ref().unwrap().selected,
+            ColorPickerSelection::Clear
+        );
+        // Left at the start stays clamped on Clear.
+        handle_choose_workspace_color_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::empty()),
+        );
+        assert_eq!(
+            state.color_picker.as_ref().unwrap().selected,
+            ColorPickerSelection::Clear
+        );
+    }
+
+    #[test]
+    fn picker_typing_hex_switches_to_custom() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = open_picker_with_workspace();
+        for c in ['#', 'a', 'b', 'c'] {
+            handle_choose_workspace_color_key(
+                &mut state,
+                KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty()),
+            );
+        }
+        let picker = state.color_picker.as_ref().unwrap();
+        assert_eq!(picker.selected, ColorPickerSelection::Custom);
+        assert_eq!(picker.hex_input, "#abc");
+    }
+
+    #[test]
+    fn picker_enter_applies_and_esc_cancels() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = open_picker_with_workspace();
+        if let Some(picker) = state.color_picker.as_mut() {
+            picker.selected = ColorPickerSelection::Swatch(0); // "red"
+        }
+        handle_choose_workspace_color_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+        assert_eq!(state.mode, Mode::Navigate);
+        assert!(state.color_picker.is_none());
+        assert_eq!(state.workspaces[0].accent_color.as_deref(), Some("red"));
+
+        let mut state = open_picker_with_workspace();
+        handle_choose_workspace_color_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+        assert_eq!(state.mode, Mode::Navigate);
+        assert!(state.color_picker.is_none());
+        assert!(state.workspaces[0].accent_color.is_none());
     }
 
     #[test]
