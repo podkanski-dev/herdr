@@ -3,8 +3,12 @@
 //! Each pane's live bottom-of-buffer text is read periodically and matched
 //! against known agent output patterns to determine state.
 
+mod agent_commands;
 pub mod manifest;
 pub mod manifest_update;
+
+#[allow(unused_imports)] // consumed by the config-loading layer in a later task
+pub use agent_commands::set_agent_command_registry;
 
 /// The detected state of a terminal pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,7 +164,7 @@ pub fn identify_agent(process_name: &str) -> Option<Agent> {
         "hermes" | "hermes-agent" => Some(Agent::Hermes),
         "kilo" | "kilo-code" | "kilo code" => Some(Agent::Kilo),
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
-        _ => None,
+        _ => agent_commands::registered_agent(&name),
     }
 }
 
@@ -514,7 +518,7 @@ fn agent_name_from_basename(basename: &str) -> Option<String> {
     Some(agent_label(agent).to_string())
 }
 
-fn normalized_agent_lookup_name(name: &str) -> String {
+pub(super) fn normalized_agent_lookup_name(name: &str) -> String {
     let mut name = name.trim().to_lowercase();
     for suffix in [".exe", ".cmd", ".bat", ".ps1", ".js"] {
         if name.ends_with(suffix) {
@@ -1121,6 +1125,21 @@ mod tests {
 
         child.kill().ok();
         child.wait().ok();
+    }
+
+    #[test]
+    fn identify_agent_uses_registered_commands() {
+        super::agent_commands::set_agent_command_registry([
+            ("claude-xebia".to_string(), Agent::Claude),
+            ("Claude-MTV".to_string(), Agent::Claude),
+        ]);
+        assert_eq!(identify_agent("claude-xebia"), Some(Agent::Claude));
+        // normalization: case + .exe suffix
+        assert_eq!(identify_agent("claude-mtv.exe"), Some(Agent::Claude));
+        // built-ins still win and unknown still None after clearing
+        super::agent_commands::set_agent_command_registry([]);
+        assert_eq!(identify_agent("claude"), Some(Agent::Claude));
+        assert_eq!(identify_agent("claude-xebia"), None);
     }
 
     #[cfg(target_os = "linux")]
