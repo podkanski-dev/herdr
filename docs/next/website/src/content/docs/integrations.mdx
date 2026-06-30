@@ -106,6 +106,26 @@ The hook reports Claude Code session identity to the local Herdr socket on sessi
 
 Herdr uses `~/.claude` by default, or `CLAUDE_CONFIG_DIR` when set. The Claude config directory must already exist. Install writes `hooks/herdr-agent-state.sh` and updates `settings.json` with Herdr hook entries. Uninstall removes the matching hook entries and deletes the hook script.
 
+### Multiple account config dirs
+
+If you run multiple Claude accounts, each with its own config directory, install the hook into each one so session capture works per account.
+
+List the directories under `[agents.claude] config_dirs` in `~/.config/herdr/config.toml` (see [Custom agent commands](/docs/configuration/#custom-agent-commands)), then run:
+
+```bash
+herdr integration install claude
+```
+
+Herdr installs into the default config dir and each listed `config_dirs` entry. A listed dir that does not exist is reported and skipped; the default dir missing is an error.
+
+Or install without editing config using `--config-dir` (the flag can be repeated):
+
+```bash
+herdr integration install claude --config-dir ~/.claude-xebia --config-dir ~/.claude-mtv
+```
+
+The same flag works for `herdr integration uninstall claude`. `--config-dir` is Claude-only.
+
 ## Codex
 
 Install the Codex hook:

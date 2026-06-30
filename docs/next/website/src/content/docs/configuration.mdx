@@ -488,6 +488,22 @@ Session references are stored in the local Herdr session snapshot. They are not 
 
 For how native agent session restore differs from pane screen history and live handoff, see [Session state and restore](/docs/session-state/).
 
+## Custom agent commands
+
+If you run multiple Claude accounts through separate executables — for example, wrapper scripts that set a different `CLAUDE_CONFIG_DIR` before invoking the real agent — you can tell Herdr to recognize those commands as the built-in agent and resume panes with the same command that launched them.
+
+```toml
+[agents.claude]
+commands    = ["claude-xebia", "claude-mtv", "claude-personal"]
+config_dirs = ["~/.claude-xebia", "~/.claude-mtv", "~/.claude-personal"]
+```
+
+The `[agents.<id>]` table is keyed by a built-in agent id such as `claude` or `codex`. An unknown id is ignored with a startup warning.
+
+`commands` lists extra executable names Herdr should treat as that agent. When a pane's foreground process matches one of these names, Herdr applies the agent's screen manifest for state detection. On native session restore, Herdr relaunches that same command instead of the default agent executable. Each name must be a real executable on your `PATH`. A wrapper script or symlink works; a plain shell alias does not, because Herdr both detects and re-launches a real process.
+
+`config_dirs` lists additional account config directories the integration installer should target. Each entry is a path to a directory that holds its own `settings.json` — typically the directory a wrapper sets as `CLAUDE_CONFIG_DIR`. `~` is expanded. See [Integrations](/docs/integrations/#claude-code) for how to install the hook into multiple config dirs.
+
 ## IME cursor tracking
 
 When the focused pane hides its cursor and paints its own — common in AI-agent TUIs like Claude Code, pi, codex, and Devin — macOS native input methods stop tracking the candidate window position because the outer terminal stops reporting the cursor.
