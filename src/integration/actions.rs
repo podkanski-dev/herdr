@@ -57,17 +57,20 @@ fn install_target_inner(target: crate::api::schema::IntegrationTarget) -> io::Re
             messages
         }
         crate::api::schema::IntegrationTarget::Claude => {
-            let installed = install_claude()?;
-            vec![
-                format!(
+            let result = install_claude()?;
+            let mut messages = Vec::new();
+            for installed in &result.installed {
+                messages.push(format!(
                     "installed claude integration hook to {}",
                     installed.hook_path.display()
-                ),
-                format!(
+                ));
+                messages.push(format!(
                     "ensured claude settings at {}",
                     installed.settings_path.display()
-                ),
-            ]
+                ));
+            }
+            messages.extend(result.warnings);
+            messages
         }
         crate::api::schema::IntegrationTarget::Codex => {
             let installed = install_codex()?;

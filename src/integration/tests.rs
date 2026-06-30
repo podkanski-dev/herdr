@@ -775,7 +775,8 @@ fn install_claude_writes_hook_and_updates_settings() {
     .unwrap();
     std::env::set_var("HOME", &home);
 
-    let installed = install_claude().unwrap();
+    let result = install_claude().unwrap();
+    let installed = &result.installed[0];
     let hook_content = fs::read_to_string(&installed.hook_path).unwrap();
     let settings: Value =
         serde_json::from_str(&fs::read_to_string(&installed.settings_path).unwrap()).unwrap();
@@ -812,7 +813,8 @@ fn install_claude_uses_claude_config_dir_env() {
     fs::create_dir_all(&claude_dir).unwrap();
     std::env::set_var(CLAUDE_CONFIG_DIR_ENV_VAR, &claude_dir);
 
-    let installed = install_claude().unwrap();
+    let result = install_claude().unwrap();
+    let installed = &result.installed[0];
 
     assert_eq!(installed.settings_path, claude_dir.join("settings.json"));
     assert_eq!(
@@ -1078,6 +1080,24 @@ fn uninstall_claude_removes_herdr_hooks_and_preserves_others() {
 
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_claude_into_targets_explicit_dir() {
+    let tmp_base = std::env::temp_dir().join(format!(
+        "herdr-claude-into-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let dir = tmp_base.join("acct");
+    std::fs::create_dir_all(&dir).unwrap();
+    let paths = super::targets::install_claude_into(&dir).unwrap();
+    assert!(paths.hook_path.starts_with(&dir));
+    assert!(dir.join("settings.json").is_file());
+    let _ = std::fs::remove_dir_all(&tmp_base);
 }
 
 #[test]

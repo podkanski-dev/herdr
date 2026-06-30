@@ -313,7 +313,6 @@ impl AgentsConfig {
     }
 
     /// Raw (unexpanded) config-dir strings configured for `agent_id`.
-    #[allow(dead_code)] // consumed by the integration installer layer in a later task
     pub fn config_dirs_for(&self, agent_id: &str) -> Vec<String> {
         self.entries
             .get(agent_id)
