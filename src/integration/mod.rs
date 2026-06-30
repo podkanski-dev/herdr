@@ -8,7 +8,9 @@ mod targets;
 mod types;
 mod version;
 
-pub(crate) use actions::{install_target, uninstall_target};
+pub(crate) use actions::{
+    install_claude_extra_dirs, install_target, uninstall_claude_extra_dirs, uninstall_target,
+};
 #[cfg(test)]
 pub(crate) use env::integration_env_lock;
 pub(crate) use env::{

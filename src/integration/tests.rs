@@ -1056,9 +1056,9 @@ fn uninstall_claude_removes_herdr_hooks_and_preserves_others() {
         serde_json::from_str(&fs::read_to_string(claude_dir.join("settings.json")).unwrap())
             .unwrap();
 
-    assert!(result.removed_hook_file);
-    assert!(result.updated_settings);
-    assert!(!result.hook_path.exists());
+    assert!(result.results[0].removed_hook_file);
+    assert!(result.results[0].updated_settings);
+    assert!(!result.results[0].hook_path.exists());
     assert_eq!(
         settings["hooks"]["UserPromptSubmit"][0]["hooks"]
             .as_array()
@@ -1119,6 +1119,33 @@ fn install_claude_into_dirs_installs_present_and_warns_missing() {
         .any(|p| p.hook_path.starts_with(&present)));
     assert_eq!(result.warnings.len(), 1);
     assert!(result.warnings[0].contains("nope-not-here"));
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn uninstall_claude_from_dirs_warns_missing() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let default = base.join("default");
+    let present = base.join("present");
+    fs::create_dir_all(&default).unwrap();
+    fs::create_dir_all(&present).unwrap();
+    // install into both dirs so uninstall has real work to do
+    super::targets::install_claude_into(&default).unwrap();
+    super::targets::install_claude_into(&present).unwrap();
+    let missing = base.join("nope-not-here"); // intentionally not created
+    let summary = super::targets::uninstall_claude_from_dirs(
+        default.clone(),
+        &[
+            present.display().to_string(),
+            missing.display().to_string(),
+        ],
+    )
+    .unwrap();
+    // default + present processed; missing produced a warning
+    assert_eq!(summary.results.len(), 2);
+    assert_eq!(summary.warnings.len(), 1);
+    assert!(summary.warnings[0].contains("nope-not-here"));
     let _ = fs::remove_dir_all(base);
 }
 

@@ -1,13 +1,16 @@
 use std::io;
 
+use super::env::claude_dir;
 use super::registry::{integration_target_label, integration_target_supported};
 use super::targets::{
-    install_claude, install_codex, install_copilot, install_cursor, install_devin, install_droid,
-    install_hermes, install_kilo, install_kimi, install_omp, install_opencode, install_pi,
-    install_qodercli, uninstall_claude, uninstall_codex, uninstall_copilot, uninstall_cursor,
-    uninstall_devin, uninstall_droid, uninstall_hermes, uninstall_kilo, uninstall_kimi,
-    uninstall_omp, uninstall_opencode, uninstall_pi, uninstall_qodercli,
+    install_claude, install_claude_into_dirs, install_codex, install_copilot, install_cursor,
+    install_devin, install_droid, install_hermes, install_kilo, install_kimi, install_omp,
+    install_opencode, install_pi, install_qodercli, uninstall_claude, uninstall_claude_from_dirs,
+    uninstall_codex, uninstall_copilot, uninstall_cursor, uninstall_devin, uninstall_droid,
+    uninstall_hermes, uninstall_kilo, uninstall_kimi, uninstall_omp, uninstall_opencode,
+    uninstall_pi, uninstall_qodercli,
 };
+use super::types::{ClaudeInstallResult, ClaudeUninstallSummary};
 use super::version::{agent_version_requirement, enforce_agent_version};
 use super::{KIMI_MIN_VERSION, PI_EXTENSION_INSTALL_NAME};
 
@@ -58,19 +61,7 @@ fn install_target_inner(target: crate::api::schema::IntegrationTarget) -> io::Re
         }
         crate::api::schema::IntegrationTarget::Claude => {
             let result = install_claude()?;
-            let mut messages = Vec::new();
-            for installed in &result.installed {
-                messages.push(format!(
-                    "installed claude integration hook to {}",
-                    installed.hook_path.display()
-                ));
-                messages.push(format!(
-                    "ensured claude settings at {}",
-                    installed.settings_path.display()
-                ));
-            }
-            messages.extend(result.warnings);
-            messages
+            claude_install_messages(&result)
         }
         crate::api::schema::IntegrationTarget::Codex => {
             let installed = install_codex()?;
@@ -235,31 +226,8 @@ pub(crate) fn uninstall_target(
             }
         }
         crate::api::schema::IntegrationTarget::Claude => {
-            let result = uninstall_claude()?;
-            let mut messages = Vec::new();
-            if result.removed_hook_file {
-                messages.push(format!(
-                    "removed claude hook at {}",
-                    result.hook_path.display()
-                ));
-            } else {
-                messages.push(format!(
-                    "no claude hook found at {}",
-                    result.hook_path.display()
-                ));
-            }
-            if result.updated_settings {
-                messages.push(format!(
-                    "removed herdr claude hook entries from {}",
-                    result.settings_path.display()
-                ));
-            } else {
-                messages.push(format!(
-                    "no herdr claude hook entries found in {}",
-                    result.settings_path.display()
-                ));
-            }
-            messages
+            let summary = uninstall_claude()?;
+            claude_uninstall_messages(&summary)
         }
         crate::api::schema::IntegrationTarget::Codex => {
             let result = uninstall_codex()?;
@@ -524,4 +492,64 @@ pub(crate) fn uninstall_target(
 
     crate::logging::integration_action("uninstall", integration_target_label(target), "ok");
     Ok(messages)
+}
+
+fn claude_install_messages(result: &ClaudeInstallResult) -> Vec<String> {
+    let mut messages = Vec::new();
+    for installed in &result.installed {
+        messages.push(format!(
+            "installed claude integration hook to {}",
+            installed.hook_path.display()
+        ));
+        messages.push(format!(
+            "ensured claude settings at {}",
+            installed.settings_path.display()
+        ));
+    }
+    messages.extend(result.warnings.iter().cloned());
+    messages
+}
+
+fn claude_uninstall_messages(summary: &ClaudeUninstallSummary) -> Vec<String> {
+    let mut messages = Vec::new();
+    for result in &summary.results {
+        if result.removed_hook_file {
+            messages.push(format!(
+                "removed claude hook at {}",
+                result.hook_path.display()
+            ));
+        } else {
+            messages.push(format!(
+                "no claude hook found at {}",
+                result.hook_path.display()
+            ));
+        }
+        if result.updated_settings {
+            messages.push(format!(
+                "removed herdr claude hook entries from {}",
+                result.settings_path.display()
+            ));
+        } else {
+            messages.push(format!(
+                "no herdr claude hook entries found in {}",
+                result.settings_path.display()
+            ));
+        }
+    }
+    messages.extend(summary.warnings.iter().cloned());
+    messages
+}
+
+/// Install the claude integration into the default claude dir plus the given
+/// extra dirs (tilde-expanded, deduped, warn-skipped when absent).
+pub(crate) fn install_claude_extra_dirs(extra: &[String]) -> io::Result<Vec<String>> {
+    let result = install_claude_into_dirs(claude_dir()?, extra)?;
+    Ok(claude_install_messages(&result))
+}
+
+/// Uninstall the claude integration from the default claude dir plus the given
+/// extra dirs (tilde-expanded, deduped, warn-skipped when absent).
+pub(crate) fn uninstall_claude_extra_dirs(extra: &[String]) -> io::Result<Vec<String>> {
+    let summary = uninstall_claude_from_dirs(claude_dir()?, extra)?;
+    Ok(claude_uninstall_messages(&summary))
 }

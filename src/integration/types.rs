@@ -158,6 +158,12 @@ pub(crate) struct ClaudeUninstallResult {
 }
 
 #[derive(Debug)]
+pub(crate) struct ClaudeUninstallSummary {
+    pub results: Vec<ClaudeUninstallResult>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug)]
 pub(crate) struct CodexUninstallResult {
     pub hook_path: PathBuf,
     pub hooks_path: PathBuf,
