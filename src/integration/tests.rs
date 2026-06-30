@@ -1084,23 +1084,29 @@ fn uninstall_claude_removes_herdr_hooks_and_preserves_others() {
 
 #[test]
 fn install_claude_into_targets_explicit_dir() {
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path().join("acct");
-    std::fs::create_dir_all(&dir).unwrap();
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let dir = base.join("acct");
+    fs::create_dir_all(&dir).unwrap();
     let paths = super::targets::install_claude_into(&dir).unwrap();
     assert!(paths.hook_path.starts_with(&dir));
     assert!(dir.join("settings.json").is_file());
+    let _ = fs::remove_dir_all(base);
 }
 
 #[test]
 fn install_claude_into_dirs_installs_present_and_warns_missing() {
-    let default = tempfile::tempdir().unwrap();
-    let present = tempfile::tempdir().unwrap();
-    let missing = present.path().join("nope-not-here");
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let default = base.join("default");
+    let present = base.join("present");
+    fs::create_dir_all(&default).unwrap();
+    fs::create_dir_all(&present).unwrap();
+    let missing = base.join("nope-not-here"); // intentionally not created
     let result = super::targets::install_claude_into_dirs(
-        default.path().to_path_buf(),
+        default.clone(),
         &[
-            present.path().display().to_string(),
+            present.display().to_string(),
             missing.display().to_string(),
         ],
     )
@@ -1110,9 +1116,10 @@ fn install_claude_into_dirs_installs_present_and_warns_missing() {
     assert!(result
         .installed
         .iter()
-        .any(|p| p.hook_path.starts_with(present.path())));
+        .any(|p| p.hook_path.starts_with(&present)));
     assert_eq!(result.warnings.len(), 1);
     assert!(result.warnings[0].contains("nope-not-here"));
+    let _ = fs::remove_dir_all(base);
 }
 
 #[test]
