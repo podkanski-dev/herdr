@@ -771,7 +771,7 @@ fn restore_plan_for_snapshot(
         return None;
     }
     let persisted = persisted_agent_session_from_snapshot(session)?;
-    crate::agent_resume::plan(&session.source, &session.agent, &persisted.session_ref)
+    crate::agent_resume::plan(&session.source, &session.agent, &persisted.session_ref, None)
 }
 
 fn persisted_agent_session_from_snapshot(

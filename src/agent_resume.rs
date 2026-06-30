@@ -30,6 +30,7 @@ pub struct PersistedAgentSession {
     pub source: String,
     pub agent: String,
     pub session_ref: AgentSessionRef,
+    pub command: Option<String>,
 }
 
 impl AgentSessionRef {
@@ -109,15 +110,21 @@ pub fn session_ref_from_snapshot(
         source: source.to_string(),
         agent: agent.to_string(),
         session_ref,
+        command: None,
     })
 }
 
-pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<AgentResumePlan> {
+pub fn plan(
+    source: &str,
+    agent: &str,
+    session_ref: &AgentSessionRef,
+    command: Option<&str>,
+) -> Option<AgentResumePlan> {
     if !is_official_agent_source(source, agent) {
         return None;
     }
 
-    let argv = match (source, agent, session_ref.kind) {
+    let mut argv = match (source, agent, session_ref.kind) {
         ("herdr:claude", "claude", AgentSessionRefKind::Id) => {
             vec![
                 "claude".into(),
@@ -182,6 +189,12 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
         _ => return None,
     };
 
+    if let Some(command) = command.filter(|command| valid_resume_command(command)) {
+        if let Some(first) = argv.first_mut() {
+            *first = command.to_string();
+        }
+    }
+
     Some(AgentResumePlan {
         agent: agent.to_string(),
         argv,
@@ -217,6 +230,13 @@ fn is_official_agent_source(source: &str, agent: &str) -> bool {
 
 fn valid_session_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= MAX_SESSION_ID_LEN && !value.chars().any(char::is_control)
+}
+
+fn valid_resume_command(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_SESSION_ID_LEN
+        && !value.chars().any(char::is_control)
+        && !value.contains(['/', '\\'])
 }
 
 fn valid_session_path(value: &str) -> bool {
@@ -258,7 +278,8 @@ mod tests {
             plan(
                 "herdr:claude",
                 "claude",
-                &AgentSessionRef::id("claude-session").unwrap()
+                &AgentSessionRef::id("claude-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -268,7 +289,8 @@ mod tests {
             plan(
                 "herdr:codex",
                 "codex",
-                &AgentSessionRef::id("codex-session").unwrap()
+                &AgentSessionRef::id("codex-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -278,7 +300,8 @@ mod tests {
             plan(
                 "herdr:copilot",
                 "copilot",
-                &AgentSessionRef::id("copilot-session").unwrap()
+                &AgentSessionRef::id("copilot-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -288,7 +311,8 @@ mod tests {
             plan(
                 "herdr:devin",
                 "devin",
-                &AgentSessionRef::id("devin-session").unwrap()
+                &AgentSessionRef::id("devin-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -298,7 +322,8 @@ mod tests {
             plan(
                 "herdr:droid",
                 "droid",
-                &AgentSessionRef::id("droid-session").unwrap()
+                &AgentSessionRef::id("droid-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -308,7 +333,8 @@ mod tests {
             plan(
                 "herdr:kimi",
                 "kimi",
-                &AgentSessionRef::id("kimi-session").unwrap()
+                &AgentSessionRef::id("kimi-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -318,7 +344,8 @@ mod tests {
             plan(
                 "herdr:pi",
                 "pi",
-                &AgentSessionRef::path(&pi_session).unwrap()
+                &AgentSessionRef::path(&pi_session).unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -328,7 +355,8 @@ mod tests {
             plan(
                 "herdr:omp",
                 "omp",
-                &AgentSessionRef::path(&omp_session).unwrap()
+                &AgentSessionRef::path(&omp_session).unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -338,7 +366,8 @@ mod tests {
             plan(
                 "herdr:hermes",
                 "hermes",
-                &AgentSessionRef::id("hermes-session").unwrap()
+                &AgentSessionRef::id("hermes-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -348,7 +377,8 @@ mod tests {
             plan(
                 "herdr:opencode",
                 "opencode",
-                &AgentSessionRef::id("opencode-session").unwrap()
+                &AgentSessionRef::id("opencode-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -358,7 +388,8 @@ mod tests {
             plan(
                 "herdr:qodercli",
                 "qodercli",
-                &AgentSessionRef::id("qoder-session").unwrap()
+                &AgentSessionRef::id("qoder-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -368,7 +399,8 @@ mod tests {
             plan(
                 "herdr:kilo",
                 "kilo",
-                &AgentSessionRef::id("kilo-session").unwrap()
+                &AgentSessionRef::id("kilo-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -378,7 +410,8 @@ mod tests {
             plan(
                 "herdr:cursor",
                 "cursor",
-                &AgentSessionRef::id("cursor-session").unwrap()
+                &AgentSessionRef::id("cursor-session").unwrap(),
+                None
             )
             .unwrap()
             .argv,
@@ -392,13 +425,15 @@ mod tests {
         assert!(plan(
             "custom:claude",
             "claude",
-            &AgentSessionRef::id("session").unwrap()
+            &AgentSessionRef::id("session").unwrap(),
+            None
         )
         .is_none());
         assert!(plan(
             "herdr:claude",
             "claude",
-            &AgentSessionRef::path(&claude_session).unwrap()
+            &AgentSessionRef::path(&claude_session).unwrap(),
+            None
         )
         .is_none());
     }
@@ -539,18 +574,21 @@ mod tests {
     #[test]
     fn ids_are_data_not_shell_text() {
         let id = "abc; rm -rf /";
-        let codex_plan = plan("herdr:codex", "codex", &AgentSessionRef::id(id).unwrap()).unwrap();
+        let codex_plan =
+            plan("herdr:codex", "codex", &AgentSessionRef::id(id).unwrap(), None).unwrap();
         assert_eq!(codex_plan.argv, vec!["codex", "resume", id]);
 
         let copilot_plan = plan(
             "herdr:copilot",
             "copilot",
             &AgentSessionRef::id(id).unwrap(),
+            None,
         )
         .unwrap();
         assert_eq!(copilot_plan.argv, vec!["copilot", "--resume=abc; rm -rf /"]);
 
-        let devin_plan = plan("herdr:devin", "devin", &AgentSessionRef::id(id).unwrap()).unwrap();
+        let devin_plan =
+            plan("herdr:devin", "devin", &AgentSessionRef::id(id).unwrap(), None).unwrap();
         assert_eq!(devin_plan.argv, vec!["devin", "--resume", id]);
     }
 
@@ -564,31 +602,36 @@ mod tests {
         assert!(plan(
             "herdr:hermes",
             "hermes",
-            &AgentSessionRef::path(&hermes_session).unwrap()
+            &AgentSessionRef::path(&hermes_session).unwrap(),
+            None
         )
         .is_none());
         assert!(plan(
             "herdr:opencode",
             "opencode",
-            &AgentSessionRef::path(&opencode_session).unwrap()
+            &AgentSessionRef::path(&opencode_session).unwrap(),
+            None
         )
         .is_none());
         assert!(plan(
             "herdr:kilo",
             "kilo",
-            &AgentSessionRef::path(&kilo_session).unwrap()
+            &AgentSessionRef::path(&kilo_session).unwrap(),
+            None
         )
         .is_none());
         assert!(plan(
             "herdr:copilot",
             "copilot",
-            &AgentSessionRef::path(&copilot_session).unwrap()
+            &AgentSessionRef::path(&copilot_session).unwrap(),
+            None
         )
         .is_none());
         assert!(plan(
             "herdr:devin",
             "devin",
-            &AgentSessionRef::path(&devin_session).unwrap()
+            &AgentSessionRef::path(&devin_session).unwrap(),
+            None
         )
         .is_none());
         assert!(session_ref_from_snapshot(
@@ -626,5 +669,20 @@ mod tests {
             "devin-session"
         )
         .is_some());
+    }
+
+    #[test]
+    fn plan_uses_command_override_for_argv0() {
+        let session = AgentSessionRef::id("xebia-session").unwrap();
+        let result = plan("herdr:claude", "claude", &session, Some("claude-xebia")).unwrap();
+        assert_eq!(result.argv, vec!["claude-xebia", "--resume", "xebia-session"]);
+
+        // invalid override (path separator) falls back to the default binary
+        let result = plan("herdr:claude", "claude", &session, Some("/usr/bin/claude-xebia")).unwrap();
+        assert_eq!(result.argv, vec!["claude", "--resume", "xebia-session"]);
+
+        // no override preserves existing behavior
+        let result = plan("herdr:claude", "claude", &session, None).unwrap();
+        assert_eq!(result.argv, vec!["claude", "--resume", "xebia-session"]);
     }
 }
