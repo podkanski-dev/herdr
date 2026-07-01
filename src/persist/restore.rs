@@ -776,7 +776,7 @@ fn restore_plan_for_snapshot(
         &session.agent,
         &persisted.session_ref,
         session.command.as_deref(),
-        None,
+        session.config_dir.as_deref(),
     )
 }
 
@@ -790,6 +790,7 @@ fn persisted_agent_session_from_snapshot(
         &session.value,
     )?;
     persisted.command = session.command.clone();
+    persisted.config_dir = session.config_dir.clone();
     Some(persisted)
 }
 
@@ -1008,6 +1009,7 @@ mod tests {
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: pi_session_path.clone(),
             command: None,
+            config_dir: None,
         };
 
         assert!(restore_plan_for_snapshot(&session, false).is_none());
@@ -1022,6 +1024,7 @@ mod tests {
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("claude-session"),
             command: None,
+            config_dir: None,
         };
         assert!(restore_plan_for_snapshot(&unsupported_path, true).is_none());
     }
@@ -1035,6 +1038,7 @@ mod tests {
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: pi_session_path.clone(),
             command: None,
+            config_dir: None,
         };
         let mut resumed = HashSet::new();
 
@@ -1058,6 +1062,7 @@ mod tests {
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
             command: None,
+            config_dir: None,
         };
         let history = super::super::snapshot::PaneHistorySnapshot {
             ansi: "RESTORED_HISTORY\r\n".into(),
@@ -1084,6 +1089,7 @@ mod tests {
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
             command: None,
+            config_dir: None,
         };
         let history = super::super::snapshot::PaneHistorySnapshot {
             ansi: "RESTORED_HISTORY\r\n".into(),
@@ -1113,6 +1119,7 @@ mod tests {
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
             command: None,
+            config_dir: None,
         };
         let history = super::super::snapshot::PaneHistorySnapshot {
             ansi: "RESTORED_HISTORY\r\n".into(),
@@ -1140,6 +1147,7 @@ mod tests {
             kind: crate::agent_resume::AgentSessionRefKind::Id,
             value: "hermes-session".into(),
             command: None,
+            config_dir: None,
         };
 
         let preserved = restored_terminal_agent_session(Some(&session), false)
@@ -1157,6 +1165,7 @@ mod tests {
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
             command: None,
+            config_dir: None,
         };
         let mut resumed = HashSet::new();
         assert!(take_restore_plan_for_snapshot(&session, true, &mut resumed).is_some());
@@ -1195,6 +1204,7 @@ mod tests {
                                 kind: crate::agent_resume::AgentSessionRefKind::Id,
                                 value: "opencode-session".into(),
                                 command: None,
+                                config_dir: None,
                             }),
                             launch_argv: None,
                         },
@@ -1351,6 +1361,7 @@ mod tests {
                 kind: crate::agent_resume::AgentSessionRefKind::Id,
                 value: "codex-session".into(),
                 command: None,
+                config_dir: None,
             }),
             launch_argv: None,
         };
@@ -1506,6 +1517,7 @@ mod tests {
                                 kind: crate::agent_resume::AgentSessionRefKind::Id,
                                 value: "codex-session".into(),
                                 command: None,
+                                config_dir: None,
                             }),
                             launch_argv: None,
                         },
