@@ -776,6 +776,7 @@ fn restore_plan_for_snapshot(
         &session.agent,
         &persisted.session_ref,
         session.command.as_deref(),
+        None,
     )
 }
 

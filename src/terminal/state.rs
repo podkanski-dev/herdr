@@ -303,6 +303,7 @@ impl TerminalState {
                         agent: authority.agent_label.clone(),
                         session_ref: session_ref.clone(),
                         command: None,
+                        config_dir: None,
                     }
                 })
             });
@@ -963,6 +964,7 @@ impl TerminalState {
             agent: agent_label,
             session_ref,
             command: self.detected_command.clone(),
+            config_dir: None,
         });
         let current_session = self.current_session_identity_for_persistence();
         Some(TerminalStateMutation {
@@ -3260,6 +3262,7 @@ mod tests {
             session_ref: crate::agent_resume::AgentSessionRef::path(test_session_path("old.jsonl"))
                 .unwrap(),
             command: None,
+            config_dir: None,
         });
 
         let mutation = terminal
@@ -3691,6 +3694,7 @@ mod tests {
             agent: "hermes".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("hermes-session").unwrap(),
             command: None,
+            config_dir: None,
         });
 
         let mutation = terminal
@@ -3710,6 +3714,7 @@ mod tests {
             agent: "claude".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("claude-session").unwrap(),
             command: None,
+            config_dir: None,
         });
         terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
 
@@ -3737,6 +3742,7 @@ mod tests {
             session_ref: crate::agent_resume::AgentSessionRef::path(test_session_path("pi.jsonl"))
                 .unwrap(),
             command: None,
+            config_dir: None,
         });
         terminal.set_detected_state(Some(Agent::Pi), AgentState::Working);
 
@@ -3762,6 +3768,7 @@ mod tests {
             agent: "claude".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("claude-session").unwrap(),
             command: None,
+            config_dir: None,
         });
         terminal.set_detected_state(Some(Agent::Pi), AgentState::Working);
 
@@ -3795,6 +3802,7 @@ mod tests {
             agent: "codex".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("codex-session").unwrap(),
             command: None,
+            config_dir: None,
         });
         terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
 
@@ -3898,6 +3906,7 @@ mod tests {
             agent: "opencode".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("opencode-session").unwrap(),
             command: None,
+            config_dir: None,
         });
 
         let first =
@@ -3918,6 +3927,7 @@ mod tests {
             agent: "hermes".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("hermes-session").unwrap(),
             command: None,
+            config_dir: None,
         });
 
         let mutation = terminal.set_detected_state_with_mutation(None, AgentState::Unknown);

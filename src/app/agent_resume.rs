@@ -394,6 +394,7 @@ mod tests {
             agent: "codex".into(),
             argv: marker_resume_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         assert!(!app.start_pending_agent_resumes(false));
@@ -471,6 +472,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         app.sync_pending_agent_resume_deadline(std::time::Instant::now());
@@ -521,6 +523,7 @@ mod tests {
                 agent: "codex".into(),
                 argv: long_running_test_argv(),
                 dedupe_key: format!("herdr:codex\0codex\0Id\0{terminal_id}"),
+                env: Vec::new(),
             });
         }
         app.pending_agent_resume_deadline =
@@ -584,6 +587,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0inactive-tab-session".into(),
+            env: Vec::new(),
         });
 
         assert!(app.start_pending_agent_resumes(false));
@@ -644,6 +648,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0zoom-hidden-session".into(),
+            env: Vec::new(),
         });
 
         assert!(app.start_pending_agent_resumes(false));
@@ -701,6 +706,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         app.sync_pending_agent_resume_deadline(std::time::Instant::now());
@@ -761,6 +767,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         assert!(app.start_pending_agent_resumes(false));

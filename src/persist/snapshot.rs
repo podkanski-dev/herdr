@@ -1122,6 +1122,7 @@ mod tests {
                 agent: "opencode".into(),
                 session_ref: crate::agent_resume::AgentSessionRef::id("opencode-session").unwrap(),
                 command: None,
+                config_dir: None,
             });
 
         let snapshot = capture_from_state(&state);
@@ -1156,6 +1157,7 @@ mod tests {
                 agent: "claude".into(),
                 session_ref: crate::agent_resume::AgentSessionRef::id("xebia-session").unwrap(),
                 command: Some("claude-xebia".into()),
+                config_dir: None,
             });
 
         let snapshot = capture_from_state(&state);

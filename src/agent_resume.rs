@@ -23,6 +23,7 @@ pub struct AgentResumePlan {
     pub agent: String,
     pub argv: Vec<String>,
     pub dedupe_key: String,
+    pub env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub struct PersistedAgentSession {
     pub agent: String,
     pub session_ref: AgentSessionRef,
     pub command: Option<String>,
+    pub config_dir: Option<String>,
 }
 
 impl AgentSessionRef {
@@ -111,6 +113,7 @@ pub fn session_ref_from_snapshot(
         agent: agent.to_string(),
         session_ref,
         command: None,
+        config_dir: None,
     })
 }
 
@@ -119,6 +122,7 @@ pub fn plan(
     agent: &str,
     session_ref: &AgentSessionRef,
     command: Option<&str>,
+    config_dir: Option<&str>,
 ) -> Option<AgentResumePlan> {
     if !is_official_agent_source(source, agent) {
         return None;
@@ -195,10 +199,18 @@ pub fn plan(
         }
     }
 
+    let mut env = Vec::new();
+    if agent == "claude" {
+        if let Some(dir) = config_dir.filter(|dir| valid_resume_config_dir(dir)) {
+            env.push(("CLAUDE_CONFIG_DIR".to_string(), dir.to_string()));
+        }
+    }
+
     Some(AgentResumePlan {
         agent: agent.to_string(),
         argv,
         dedupe_key: dedupe_key(source, agent, session_ref),
+        env,
     })
 }
 
@@ -246,6 +258,31 @@ fn valid_session_path(value: &str) -> bool {
         && Path::new(value).is_absolute()
 }
 
+/// Claude stores transcripts at `<config_dir>/projects/<hash>/<uuid>.jsonl`.
+/// Return the config dir (everything before `/projects/`) when it is a
+/// non-empty absolute path.
+// Consumed by Task 2 (src/app/api/panes.rs handle_pane_report_agent_session).
+// The cfg_attr suppresses dead_code in non-test builds only; remove it once Task 2 lands.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "called in Task 2: capture config_dir from hook report"
+    )
+)]
+pub fn claude_config_dir_from_transcript_path(path: &str) -> Option<String> {
+    let idx = path.find("/projects/")?;
+    let dir = &path[..idx];
+    (!dir.is_empty() && std::path::Path::new(dir).is_absolute()).then(|| dir.to_string())
+}
+
+fn valid_resume_config_dir(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_SESSION_PATH_LEN
+        && !value.chars().any(char::is_control)
+        && std::path::Path::new(value).is_absolute()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +316,7 @@ mod tests {
                 "herdr:claude",
                 "claude",
                 &AgentSessionRef::id("claude-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -290,6 +328,7 @@ mod tests {
                 "herdr:codex",
                 "codex",
                 &AgentSessionRef::id("codex-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -301,6 +340,7 @@ mod tests {
                 "herdr:copilot",
                 "copilot",
                 &AgentSessionRef::id("copilot-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -312,6 +352,7 @@ mod tests {
                 "herdr:devin",
                 "devin",
                 &AgentSessionRef::id("devin-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -323,6 +364,7 @@ mod tests {
                 "herdr:droid",
                 "droid",
                 &AgentSessionRef::id("droid-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -334,6 +376,7 @@ mod tests {
                 "herdr:kimi",
                 "kimi",
                 &AgentSessionRef::id("kimi-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -345,6 +388,7 @@ mod tests {
                 "herdr:pi",
                 "pi",
                 &AgentSessionRef::path(&pi_session).unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -356,6 +400,7 @@ mod tests {
                 "herdr:omp",
                 "omp",
                 &AgentSessionRef::path(&omp_session).unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -367,6 +412,7 @@ mod tests {
                 "herdr:hermes",
                 "hermes",
                 &AgentSessionRef::id("hermes-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -378,6 +424,7 @@ mod tests {
                 "herdr:opencode",
                 "opencode",
                 &AgentSessionRef::id("opencode-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -389,6 +436,7 @@ mod tests {
                 "herdr:qodercli",
                 "qodercli",
                 &AgentSessionRef::id("qoder-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -400,6 +448,7 @@ mod tests {
                 "herdr:kilo",
                 "kilo",
                 &AgentSessionRef::id("kilo-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -411,6 +460,7 @@ mod tests {
                 "herdr:cursor",
                 "cursor",
                 &AgentSessionRef::id("cursor-session").unwrap(),
+                None,
                 None
             )
             .unwrap()
@@ -426,6 +476,7 @@ mod tests {
             "custom:claude",
             "claude",
             &AgentSessionRef::id("session").unwrap(),
+            None,
             None
         )
         .is_none());
@@ -433,6 +484,7 @@ mod tests {
             "herdr:claude",
             "claude",
             &AgentSessionRef::path(&claude_session).unwrap(),
+            None,
             None
         )
         .is_none());
@@ -579,6 +631,7 @@ mod tests {
             "codex",
             &AgentSessionRef::id(id).unwrap(),
             None,
+            None,
         )
         .unwrap();
         assert_eq!(codex_plan.argv, vec!["codex", "resume", id]);
@@ -588,6 +641,7 @@ mod tests {
             "copilot",
             &AgentSessionRef::id(id).unwrap(),
             None,
+            None,
         )
         .unwrap();
         assert_eq!(copilot_plan.argv, vec!["copilot", "--resume=abc; rm -rf /"]);
@@ -596,6 +650,7 @@ mod tests {
             "herdr:devin",
             "devin",
             &AgentSessionRef::id(id).unwrap(),
+            None,
             None,
         )
         .unwrap();
@@ -613,6 +668,7 @@ mod tests {
             "herdr:hermes",
             "hermes",
             &AgentSessionRef::path(&hermes_session).unwrap(),
+            None,
             None
         )
         .is_none());
@@ -620,6 +676,7 @@ mod tests {
             "herdr:opencode",
             "opencode",
             &AgentSessionRef::path(&opencode_session).unwrap(),
+            None,
             None
         )
         .is_none());
@@ -627,6 +684,7 @@ mod tests {
             "herdr:kilo",
             "kilo",
             &AgentSessionRef::path(&kilo_session).unwrap(),
+            None,
             None
         )
         .is_none());
@@ -634,6 +692,7 @@ mod tests {
             "herdr:copilot",
             "copilot",
             &AgentSessionRef::path(&copilot_session).unwrap(),
+            None,
             None
         )
         .is_none());
@@ -641,6 +700,7 @@ mod tests {
             "herdr:devin",
             "devin",
             &AgentSessionRef::path(&devin_session).unwrap(),
+            None,
             None
         )
         .is_none());
@@ -684,7 +744,14 @@ mod tests {
     #[test]
     fn plan_uses_command_override_for_argv0() {
         let session = AgentSessionRef::id("xebia-session").unwrap();
-        let result = plan("herdr:claude", "claude", &session, Some("claude-xebia")).unwrap();
+        let result = plan(
+            "herdr:claude",
+            "claude",
+            &session,
+            Some("claude-xebia"),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             result.argv,
             vec!["claude-xebia", "--resume", "xebia-session"]
@@ -696,12 +763,95 @@ mod tests {
             "claude",
             &session,
             Some("/usr/bin/claude-xebia"),
+            None,
         )
         .unwrap();
         assert_eq!(result.argv, vec!["claude", "--resume", "xebia-session"]);
 
         // no override preserves existing behavior
-        let result = plan("herdr:claude", "claude", &session, None).unwrap();
+        let result = plan("herdr:claude", "claude", &session, None, None).unwrap();
         assert_eq!(result.argv, vec!["claude", "--resume", "xebia-session"]);
+    }
+
+    #[test]
+    fn plan_sets_claude_config_dir_env() {
+        let session = AgentSessionRef::id("my-session").unwrap();
+
+        // valid absolute config_dir for claude → env contains CLAUDE_CONFIG_DIR
+        let dir = "/home/user/.claude-acme";
+        let result = plan("herdr:claude", "claude", &session, None, Some(dir)).unwrap();
+        assert_eq!(
+            result.env,
+            vec![("CLAUDE_CONFIG_DIR".to_string(), dir.to_string())]
+        );
+        // argv must not be affected
+        assert_eq!(result.argv, vec!["claude", "--resume", "my-session"]);
+
+        // non-claude agent → env empty even with a valid dir
+        let codex_session = AgentSessionRef::id("codex-session").unwrap();
+        let codex_result = plan("herdr:codex", "codex", &codex_session, None, Some(dir)).unwrap();
+        assert!(codex_result.env.is_empty());
+
+        // None config_dir → env empty
+        let result_no_dir = plan("herdr:claude", "claude", &session, None, None).unwrap();
+        assert!(result_no_dir.env.is_empty());
+
+        // relative dir → rejected → env empty
+        let result_relative = plan(
+            "herdr:claude",
+            "claude",
+            &session,
+            None,
+            Some("relative/dir"),
+        )
+        .unwrap();
+        assert!(result_relative.env.is_empty());
+
+        // empty string → rejected → env empty
+        let result_empty = plan("herdr:claude", "claude", &session, None, Some("")).unwrap();
+        assert!(result_empty.env.is_empty());
+
+        // dir with control char → rejected → env empty
+        let result_ctrl = plan(
+            "herdr:claude",
+            "claude",
+            &session,
+            None,
+            Some("/home/bad\x00dir"),
+        )
+        .unwrap();
+        assert!(result_ctrl.env.is_empty());
+    }
+
+    #[test]
+    fn config_dir_from_transcript_path_cases() {
+        // happy path: returns everything before /projects/
+        assert_eq!(
+            claude_config_dir_from_transcript_path("/x/y/projects/hash/uuid.jsonl"),
+            Some("/x/y".to_string())
+        );
+
+        // nested config dir
+        assert_eq!(
+            claude_config_dir_from_transcript_path(
+                "/home/user/.claude/projects/abc123/session.jsonl"
+            ),
+            Some("/home/user/.claude".to_string())
+        );
+
+        // no /projects/ segment → None
+        assert_eq!(
+            claude_config_dir_from_transcript_path("/home/user/.claude/sessions/uuid.jsonl"),
+            None
+        );
+
+        // relative path (not absolute) → None
+        assert_eq!(
+            claude_config_dir_from_transcript_path("rel/projects/hash/uuid.jsonl"),
+            None
+        );
+
+        // empty string → None
+        assert_eq!(claude_config_dir_from_transcript_path(""), None);
     }
 }

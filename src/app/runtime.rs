@@ -1000,6 +1000,7 @@ mod tests {
             agent: "codex".into(),
             argv: vec!["/bin/sh".into(), "-c".into(), "sleep 5".into()],
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         assert!(
@@ -1054,6 +1055,7 @@ mod tests {
             agent: "codex".into(),
             argv: vec!["/bin/sh".into(), "-c".into(), "sleep 5".into()],
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
         app.pending_agent_resume_deadline = Some(Instant::now() - Duration::from_millis(1));
 
