@@ -373,6 +373,11 @@ impl App {
     ) -> Self {
         let (prefix_code, prefix_mods) = config.prefix_key();
         crate::kitty_graphics::set_enabled(config.experimental.kitty_graphics);
+        let (agent_commands, agent_command_warnings) = config.agents.command_entries();
+        crate::detect::set_agent_command_registry(agent_commands);
+        for warning in &agent_command_warnings {
+            tracing::warn!("{warning}");
+        }
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
         let render_notify = Arc::new(Notify::new());
         let render_dirty = Arc::new(AtomicBool::new(false));
@@ -2290,6 +2295,26 @@ mod tests {
 
         let picker = app.state.color_picker.as_ref().expect("picker open");
         assert_eq!(picker.hex_input, "#abcdef");
+    }
+
+    #[test]
+    fn app_new_populates_agent_command_registry() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut config = Config::default();
+        config.agents.entries.insert(
+            "claude".to_string(),
+            crate::config::model::AgentEntryConfig {
+                commands: vec!["claude-xebia".to_string()],
+                config_dirs: vec![],
+            },
+        );
+        let _app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+        assert_eq!(
+            crate::detect::identify_agent("claude-xebia"),
+            Some(crate::detect::Agent::Claude)
+        );
+        // reset the process-global registry so sibling tests are unaffected
+        crate::detect::set_agent_command_registry([]);
     }
 
     #[test]
