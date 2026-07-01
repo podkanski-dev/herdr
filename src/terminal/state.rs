@@ -901,7 +901,14 @@ impl TerminalState {
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
     ) -> Option<TerminalStateMutation> {
-        self.set_agent_session_ref_for_session_start(source, agent_label, session_ref, seq, None)
+        self.set_agent_session_ref_for_session_start(
+            source,
+            agent_label,
+            session_ref,
+            seq,
+            None,
+            None,
+        )
     }
 
     pub fn set_agent_session_ref_for_session_start(
@@ -911,6 +918,7 @@ impl TerminalState {
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
         session_start_source: Option<String>,
+        config_dir: Option<String>,
     ) -> Option<TerminalStateMutation> {
         let session_ref = session_ref?;
         if !self.accept_hook_report(&source, seq) {
@@ -964,7 +972,7 @@ impl TerminalState {
             agent: agent_label,
             session_ref,
             command: self.detected_command.clone(),
-            config_dir: None,
+            config_dir,
         });
         let current_session = self.current_session_identity_for_persistence();
         Some(TerminalStateMutation {
@@ -1422,6 +1430,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::path(new_session.clone()),
             Some(11),
             Some("resume".into()),
+            None,
         );
 
         assert!(session_report.is_some());
@@ -3331,6 +3340,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::id("nested-session"),
             Some(21),
             Some("startup".into()),
+            None,
         );
 
         assert!(mutation.is_none());
@@ -3364,6 +3374,7 @@ mod tests {
                     crate::agent_resume::AgentSessionRef::id(&next_session),
                     Some(21),
                     Some(session_start_source.into()),
+                    None,
                 )
                 .unwrap_or_else(|| panic!("{session_start_source} should replace the session"));
 
@@ -3403,6 +3414,7 @@ mod tests {
                     crate::agent_resume::AgentSessionRef::id(&next_session),
                     Some(21),
                     Some(session_start_source.into()),
+                    None,
                 )
                 .unwrap_or_else(|| panic!("{session_start_source} should replace the session"));
 
@@ -3436,6 +3448,7 @@ mod tests {
                 crate::agent_resume::AgentSessionRef::id("opencode-new"),
                 Some(21),
                 Some("new".into()),
+                None,
             )
             .expect("new should replace the session");
 
@@ -3469,6 +3482,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::id("opencode-other"),
             Some(21),
             None,
+            None,
         );
 
         assert!(mutation.is_none());
@@ -3499,6 +3513,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::id("claude-session"),
             Some(21),
             Some("resume".into()),
+            None,
         );
 
         assert!(mutation.is_none());
@@ -4030,8 +4045,27 @@ mod tests {
             crate::agent_resume::AgentSessionRef::id("xebia-session"),
             Some(1),
             Some("startup".into()),
+            None,
         );
         let session = terminal.persisted_agent_session.as_ref().expect("session");
         assert_eq!(session.command.as_deref(), Some("claude-xebia"));
+    }
+
+    #[test]
+    fn session_report_captures_config_dir() {
+        let mut terminal = test_terminal();
+        let _ = terminal.set_agent_session_ref_for_session_start(
+            "herdr:claude".into(),
+            "claude".into(),
+            crate::agent_resume::AgentSessionRef::id("xebia-session"),
+            Some(1),
+            Some("startup".into()),
+            Some("/home/me/.claude-profiles/xebia-config".into()),
+        );
+        let session = terminal.persisted_agent_session.as_ref().expect("session");
+        assert_eq!(
+            session.config_dir.as_deref(),
+            Some("/home/me/.claude-profiles/xebia-config")
+        );
     }
 }

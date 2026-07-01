@@ -261,15 +261,6 @@ fn valid_session_path(value: &str) -> bool {
 /// Claude stores transcripts at `<config_dir>/projects/<hash>/<uuid>.jsonl`.
 /// Return the config dir (everything before `/projects/`) when it is a
 /// non-empty absolute path.
-// Consumed by Task 2 (src/app/api/panes.rs handle_pane_report_agent_session).
-// The cfg_attr suppresses dead_code in non-test builds only; remove it once Task 2 lands.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "called in Task 2: capture config_dir from hook report"
-    )
-)]
 pub fn claude_config_dir_from_transcript_path(path: &str) -> Option<String> {
     let idx = path.find("/projects/")?;
     let dir = &path[..idx];

@@ -2447,6 +2447,7 @@ impl AppState {
                 seq,
                 session_ref,
                 session_start_source,
+                config_dir,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
                     terminal.set_agent_session_ref_for_session_start(
@@ -2455,6 +2456,7 @@ impl AppState {
                         session_ref,
                         seq,
                         session_start_source,
+                        config_dir,
                     )
                 })
                 .into_iter()
