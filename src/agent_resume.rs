@@ -262,7 +262,10 @@ fn valid_session_path(value: &str) -> bool {
 /// Return the config dir (everything before `/projects/`) when it is a
 /// non-empty absolute path.
 pub fn claude_config_dir_from_transcript_path(path: &str) -> Option<String> {
-    let idx = path.find("/projects/")?;
+    // Use the last `/projects/` so a config dir whose own path contains a
+    // `/projects/` segment still resolves correctly (the trailing
+    // `<hash>/<uuid>.jsonl` never contains one).
+    let idx = path.rfind("/projects/")?;
     let dir = &path[..idx];
     (!dir.is_empty() && std::path::Path::new(dir).is_absolute()).then(|| dir.to_string())
 }
@@ -844,5 +847,14 @@ mod tests {
 
         // empty string → None
         assert_eq!(claude_config_dir_from_transcript_path(""), None);
+
+        // config dir path itself contains a /projects/ segment: the LAST
+        // /projects/ is the real boundary, so the full config dir is returned.
+        assert_eq!(
+            claude_config_dir_from_transcript_path(
+                "/home/u/projects/work/config/projects/hash/uuid.jsonl"
+            ),
+            Some("/home/u/projects/work/config".to_string())
+        );
     }
 }
