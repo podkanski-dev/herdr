@@ -1246,7 +1246,7 @@ impl App {
             return invalid_agent(id);
         };
         let config_dir = (agent_label == "claude")
-            .then(|| params.agent_session_path.as_deref())
+            .then_some(params.agent_session_path.as_deref())
             .flatten()
             .and_then(crate::agent_resume::claude_config_dir_from_transcript_path);
         self.handle_internal_event(crate::events::AppEvent::AgentSessionReported {
