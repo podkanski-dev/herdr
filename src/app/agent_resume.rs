@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use bytes::Bytes;
 use ratatui::layout::Rect;
 
 use super::App;
@@ -216,15 +215,15 @@ impl App {
             return false;
         }
 
-        let Some(resume_command) = shell_command_from_argv(&plan.argv) else {
+        if plan.argv.is_empty() {
             tracing::warn!(
                 pane = pane_id.raw(),
                 terminal = %terminal_id,
                 agent = %plan.agent,
-                "failed to start deferred agent resume with empty argv"
+                "cannot start deferred agent resume with empty argv"
             );
             return false;
-        };
+        }
         let Some(launch_env) = self
             .find_pane(pane_id)
             .and_then(|(ws_idx, _)| self.pane_launch_env(ws_idx, pane_id, plan.env.clone()))
@@ -232,15 +231,15 @@ impl App {
             return false;
         };
 
-        let runtime = match crate::terminal::TerminalRuntime::spawn(
+        let runtime = match crate::terminal::TerminalRuntime::spawn_argv_command(
             pane_id,
             rows,
             cols,
             cwd,
+            &plan.argv,
+            &launch_env,
             self.state.pane_scrollback_limit_bytes,
             host_terminal_theme,
-            crate::pane::PaneShellConfig::new(&self.state.default_shell, self.state.shell_mode),
-            &launch_env,
             self.event_tx.clone(),
             self.render_notify.clone(),
             self.render_dirty.clone(),
@@ -261,24 +260,10 @@ impl App {
             }
         };
 
-        let mut input = resume_command;
-        input.push('\r');
-        if let Err(err) = runtime.try_send_bytes(Bytes::from(input)) {
-            tracing::warn!(
-                pane = pane_id.raw(),
-                terminal = %terminal_id,
-                agent = %plan.agent,
-                err = %err,
-                "failed to send deferred agent resume command to shell"
-            );
-            runtime.shutdown();
-            return false;
-        }
-
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.pending_agent_resume_plan = None;
-            terminal.respawn_shell_on_exit = false;
+            terminal.respawn_shell_on_exit = true;
         }
         true
     }
@@ -311,33 +296,6 @@ fn stable_terminal_inner_rect(pane_inner: Rect) -> Rect {
         pane_inner.width.saturating_sub(1),
         pane_inner.height,
     )
-}
-
-fn shell_command_from_argv(argv: &[String]) -> Option<String> {
-    let mut parts = argv.iter();
-    let first = shell_quote(parts.next()?);
-    let mut command = first;
-    for part in parts {
-        command.push(' ');
-        command.push_str(&shell_quote(part));
-    }
-    Some(command)
-}
-
-fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    if value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric()
-            || matches!(
-                byte,
-                b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%' | b'+' | b'='
-            )
-    }) {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]
@@ -421,7 +379,7 @@ mod tests {
             .get(&terminal_id)
             .expect("terminal should survive launch");
         assert!(terminal.pending_agent_resume_plan.is_none());
-        assert!(!terminal.respawn_shell_on_exit);
+        assert!(terminal.respawn_shell_on_exit);
 
         let runtime = app
             .terminal_runtimes
@@ -782,20 +740,5 @@ mod tests {
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
-    }
-
-    #[test]
-    fn shell_command_from_argv_quotes_resume_arguments() {
-        let argv = vec![
-            "claude".to_string(),
-            "--resume".to_string(),
-            "session with ' quote".to_string(),
-        ];
-
-        assert_eq!(
-            shell_command_from_argv(&argv).as_deref(),
-            Some("claude --resume 'session with '\\'' quote'")
-        );
-        assert_eq!(shell_command_from_argv(&[]), None);
     }
 }
