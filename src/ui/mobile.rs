@@ -1399,7 +1399,9 @@ mod tests {
                 .count()
         }
 
-        fn render(app: &crate::app::state::AppState) -> ratatui::Terminal<ratatui::backend::TestBackend> {
+        fn render(
+            app: &crate::app::state::AppState,
+        ) -> ratatui::Terminal<ratatui::backend::TestBackend> {
             let backend = ratatui::backend::TestBackend::new(40, 20);
             let mut terminal = ratatui::Terminal::new(backend).unwrap();
             terminal

@@ -2269,8 +2269,13 @@ mod tests {
     #[test]
     fn headless_color_picker_accepts_hex_typing() {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app =
-            App::new(&Config::default(), true, None, api_rx, crate::api::EventHub::default());
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
         app.state.workspaces = vec![Workspace::test_new("test")];
         app.state.active = Some(0);
         app.state.selected = 0;
