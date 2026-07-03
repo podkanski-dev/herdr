@@ -2717,10 +2717,21 @@ mod tests {
         app.state.mode = Mode::ContextMenu;
 
         let menu = app.state.context_menu_rect().unwrap();
+        // Click the "Close" item wherever it sits in the menu (the workspace
+        // menu gained a "Set color" item, shifting "Close" down), so this test
+        // does not rot when menu items change.
+        let close_row = {
+            let items = app.state.context_menu.as_ref().unwrap().items();
+            let close_idx = items
+                .iter()
+                .position(|item| *item == "Close")
+                .expect("workspace menu has a Close item");
+            menu.y + 1 + close_idx as u16
+        };
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             menu.x + 2,
-            menu.y + 2,
+            close_row,
         ));
 
         assert_eq!(app.state.workspaces.len(), 1);
