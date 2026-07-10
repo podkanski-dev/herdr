@@ -82,6 +82,7 @@ pub struct TerminalState {
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
     pub manual_label: Option<String>,
     pub agent_name: Option<String>,
+    detected_command: Option<String>,
     hook_report_sequences: HashMap<String, u64>,
     suppressed_full_lifecycle_hook_reports: HashMap<String, SuppressedFullLifecycleHookReport>,
     stale_full_lifecycle_hook_sessions: HashMap<String, Vec<StaleFullLifecycleHookSession>>,
@@ -109,6 +110,7 @@ impl TerminalState {
             persisted_agent_session: None,
             manual_label: None,
             agent_name: None,
+            detected_command: None,
             hook_report_sequences: HashMap::new(),
             suppressed_full_lifecycle_hook_reports: HashMap::new(),
             stale_full_lifecycle_hook_sessions: HashMap::new(),
@@ -300,6 +302,8 @@ impl TerminalState {
                         source: authority.source.clone(),
                         agent: authority.agent_label.clone(),
                         session_ref: session_ref.clone(),
+                        command: None,
+                        config_dir: None,
                     }
                 })
             });
@@ -879,6 +883,10 @@ impl TerminalState {
         )
     }
 
+    pub fn set_detected_command(&mut self, command: Option<String>) {
+        self.detected_command = command.filter(|command| !command.trim().is_empty());
+    }
+
     pub fn set_persisted_agent_session(
         &mut self,
         session: crate::agent_resume::PersistedAgentSession,
@@ -893,7 +901,14 @@ impl TerminalState {
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
     ) -> Option<TerminalStateMutation> {
-        self.set_agent_session_ref_for_session_start(source, agent_label, session_ref, seq, None)
+        self.set_agent_session_ref_for_session_start(
+            source,
+            agent_label,
+            session_ref,
+            seq,
+            None,
+            None,
+        )
     }
 
     pub fn set_agent_session_ref_for_session_start(
@@ -903,6 +918,7 @@ impl TerminalState {
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
         session_start_source: Option<String>,
+        config_dir: Option<String>,
     ) -> Option<TerminalStateMutation> {
         let session_ref = session_ref?;
         if !self.accept_hook_report(&source, seq) {
@@ -955,6 +971,8 @@ impl TerminalState {
             source,
             agent: agent_label,
             session_ref,
+            command: self.detected_command.clone(),
+            config_dir,
         });
         let current_session = self.current_session_identity_for_persistence();
         Some(TerminalStateMutation {
@@ -1412,6 +1430,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::path(new_session.clone()),
             Some(11),
             Some("resume".into()),
+            None,
         );
 
         assert!(session_report.is_some());
@@ -3251,6 +3270,8 @@ mod tests {
             agent: "pi".into(),
             session_ref: crate::agent_resume::AgentSessionRef::path(test_session_path("old.jsonl"))
                 .unwrap(),
+            command: None,
+            config_dir: None,
         });
 
         let mutation = terminal
@@ -3319,6 +3340,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::id("nested-session"),
             Some(21),
             Some("startup".into()),
+            None,
         );
 
         assert!(mutation.is_none());
@@ -3352,6 +3374,7 @@ mod tests {
                     crate::agent_resume::AgentSessionRef::id(&next_session),
                     Some(21),
                     Some(session_start_source.into()),
+                    None,
                 )
                 .unwrap_or_else(|| panic!("{session_start_source} should replace the session"));
 
@@ -3391,6 +3414,7 @@ mod tests {
                     crate::agent_resume::AgentSessionRef::id(&next_session),
                     Some(21),
                     Some(session_start_source.into()),
+                    None,
                 )
                 .unwrap_or_else(|| panic!("{session_start_source} should replace the session"));
 
@@ -3424,6 +3448,7 @@ mod tests {
                 crate::agent_resume::AgentSessionRef::id("opencode-new"),
                 Some(21),
                 Some("new".into()),
+                None,
             )
             .expect("new should replace the session");
 
@@ -3457,6 +3482,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::id("opencode-other"),
             Some(21),
             None,
+            None,
         );
 
         assert!(mutation.is_none());
@@ -3487,6 +3513,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::id("claude-session"),
             Some(21),
             Some("resume".into()),
+            None,
         );
 
         assert!(mutation.is_none());
@@ -3681,6 +3708,8 @@ mod tests {
             source: "herdr:hermes".into(),
             agent: "hermes".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("hermes-session").unwrap(),
+            command: None,
+            config_dir: None,
         });
 
         let mutation = terminal
@@ -3699,6 +3728,8 @@ mod tests {
             source: "herdr:claude".into(),
             agent: "claude".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("claude-session").unwrap(),
+            command: None,
+            config_dir: None,
         });
         terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
 
@@ -3725,6 +3756,8 @@ mod tests {
             agent: "pi".into(),
             session_ref: crate::agent_resume::AgentSessionRef::path(test_session_path("pi.jsonl"))
                 .unwrap(),
+            command: None,
+            config_dir: None,
         });
         terminal.set_detected_state(Some(Agent::Pi), AgentState::Working);
 
@@ -3749,6 +3782,8 @@ mod tests {
             source: "herdr:claude".into(),
             agent: "claude".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("claude-session").unwrap(),
+            command: None,
+            config_dir: None,
         });
         terminal.set_detected_state(Some(Agent::Pi), AgentState::Working);
 
@@ -3781,6 +3816,8 @@ mod tests {
             source: "herdr:codex".into(),
             agent: "codex".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("codex-session").unwrap(),
+            command: None,
+            config_dir: None,
         });
         terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
 
@@ -3883,6 +3920,8 @@ mod tests {
             source: "herdr:opencode".into(),
             agent: "opencode".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("opencode-session").unwrap(),
+            command: None,
+            config_dir: None,
         });
 
         let first =
@@ -3902,6 +3941,8 @@ mod tests {
             source: "herdr:hermes".into(),
             agent: "hermes".into(),
             session_ref: crate::agent_resume::AgentSessionRef::id("hermes-session").unwrap(),
+            command: None,
+            config_dir: None,
         });
 
         let mutation = terminal.set_detected_state_with_mutation(None, AgentState::Unknown);
@@ -3991,6 +4032,40 @@ mod tests {
         assert_eq!(
             terminal.hook_authority.as_ref().unwrap().source,
             "custom:pi"
+        );
+    }
+
+    #[test]
+    fn session_report_captures_detected_command() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_command(Some("claude-xebia".into()));
+        let _ = terminal.set_agent_session_ref_for_session_start(
+            "herdr:claude".into(),
+            "claude".into(),
+            crate::agent_resume::AgentSessionRef::id("xebia-session"),
+            Some(1),
+            Some("startup".into()),
+            None,
+        );
+        let session = terminal.persisted_agent_session.as_ref().expect("session");
+        assert_eq!(session.command.as_deref(), Some("claude-xebia"));
+    }
+
+    #[test]
+    fn session_report_captures_config_dir() {
+        let mut terminal = test_terminal();
+        let _ = terminal.set_agent_session_ref_for_session_start(
+            "herdr:claude".into(),
+            "claude".into(),
+            crate::agent_resume::AgentSessionRef::id("xebia-session"),
+            Some(1),
+            Some("startup".into()),
+            Some("/home/me/.claude-profiles/xebia-config".into()),
+        );
+        let session = terminal.persisted_agent_session.as_ref().expect("session");
+        assert_eq!(
+            session.config_dir.as_deref(),
+            Some("/home/me/.claude-profiles/xebia-config")
         );
     }
 }

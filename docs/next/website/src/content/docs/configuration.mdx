@@ -329,6 +329,7 @@ prompt_new_tab_name = true
 pane_borders = true
 pane_gaps = true
 show_agent_labels_on_pane_borders = false
+hide_tab_bar_when_single_tab = false
 agent_panel_sort = "spaces"
 accent = "cyan"
 ```
@@ -354,6 +355,8 @@ Set `mouse_scroll_lines` to change how many pane scrollback lines each mouse whe
 Set `pane_borders = false` to remove split pane borders. Set `pane_gaps = false` to make split panes share compact divider borders. With borders disabled, pane gaps use one blank terminal cell between panes. Terminal cells are usually taller than they are wide, so a one-row gap between top/bottom panes can look larger than a one-column gap between left/right panes.
 
 Set `show_agent_labels_on_pane_borders = true` if you want detected agent labels in split pane borders when no manual pane label is set.
+
+Set `hide_tab_bar_when_single_tab = true` to hide the tab row when the active workspace has exactly one tab. New tabs can still be created with the configured keybinding. When a second tab appears, Herdr restores the tab row and resizes panes to make room for it.
 
 ## Notifications
 
@@ -484,6 +487,22 @@ This is enabled by default. Herdr only resumes panes that reported a native sess
 Session references are stored in the local Herdr session snapshot. They are not shown in normal pane, agent, status, or event output.
 
 For how native agent session restore differs from pane screen history and live handoff, see [Session state and restore](/docs/session-state/).
+
+## Custom agent commands
+
+If you run multiple Claude accounts through separate executables — for example, wrapper scripts that set a different `CLAUDE_CONFIG_DIR` before invoking the real agent — you can tell Herdr to recognize those commands as the built-in agent and resume panes with the same command that launched them.
+
+```toml
+[agents.claude]
+commands    = ["claude-xebia", "claude-mtv", "claude-personal"]
+config_dirs = ["~/.claude-xebia", "~/.claude-mtv", "~/.claude-personal"]
+```
+
+The `[agents.<id>]` table is keyed by a built-in agent id such as `claude` or `codex`. An unknown id is ignored with a startup warning.
+
+`commands` lists extra executable names Herdr should treat as that agent. When a pane's foreground process matches one of these names, Herdr applies the agent's screen manifest for state detection. On native session restore, Herdr relaunches that same command instead of the default agent executable. Each name must be a real executable on your `PATH`. A wrapper script or symlink works; a plain shell alias does not, because Herdr both detects and re-launches a real process.
+
+`config_dirs` lists additional account config directories the integration installer should target. Each entry is a path to a directory that holds its own `settings.json` — typically the directory a wrapper sets as `CLAUDE_CONFIG_DIR`. `~` is expanded. See [Integrations](/docs/integrations/#claude-code) for how to install the hook into multiple config dirs.
 
 ## IME cursor tracking
 

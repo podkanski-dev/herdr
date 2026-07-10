@@ -115,6 +115,10 @@ pub struct PaneAgentSessionSnapshot {
     pub agent: String,
     pub kind: crate::agent_resume::AgentSessionRefKind,
     pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -350,6 +354,8 @@ fn capture_tab(
                                 agent: authority.agent_label.clone(),
                                 kind: session_ref.kind,
                                 value: session_ref.value.clone(),
+                                command: None,
+                                config_dir: None,
                             });
                         }
                     }
@@ -359,6 +365,8 @@ fn capture_tab(
                             agent: session.agent.clone(),
                             kind: session.session_ref.kind,
                             value: session.session_ref.value.clone(),
+                            command: session.command.clone(),
+                            config_dir: session.config_dir.clone(),
                         }
                     })
                 });
@@ -1117,6 +1125,8 @@ mod tests {
                 source: "herdr:opencode".into(),
                 agent: "opencode".into(),
                 session_ref: crate::agent_resume::AgentSessionRef::id("opencode-session").unwrap(),
+                command: None,
+                config_dir: None,
             });
 
         let snapshot = capture_from_state(&state);
@@ -1132,6 +1142,65 @@ mod tests {
             crate::agent_resume::AgentSessionRefKind::Id
         );
         assert_eq!(agent_session.value, "opencode-session");
+    }
+
+    #[test]
+    fn capture_contract_preserves_resume_command() {
+        let mut state = state_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:claude".into(),
+                agent: "claude".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id("xebia-session").unwrap(),
+                command: Some("claude-xebia".into()),
+                config_dir: None,
+            });
+
+        let snapshot = capture_from_state(&state);
+        let agent_session = snapshot.workspaces[0].tabs[0].panes[&root.raw()]
+            .agent_session
+            .as_ref()
+            .expect("agent session");
+        assert_eq!(agent_session.command.as_deref(), Some("claude-xebia"));
+    }
+
+    #[test]
+    fn capture_contract_preserves_config_dir() {
+        let mut state = state_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:claude".into(),
+                agent: "claude".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id("xebia-session").unwrap(),
+                command: None,
+                config_dir: Some("/home/me/.claude-profiles/xebia-config".into()),
+            });
+
+        let snapshot = capture_from_state(&state);
+        let agent_session = snapshot.workspaces[0].tabs[0].panes[&root.raw()]
+            .agent_session
+            .as_ref()
+            .expect("agent session");
+        assert_eq!(
+            agent_session.config_dir.as_deref(),
+            Some("/home/me/.claude-profiles/xebia-config")
+        );
     }
 
     #[test]

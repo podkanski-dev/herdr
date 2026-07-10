@@ -373,6 +373,11 @@ impl App {
     ) -> Self {
         let (prefix_code, prefix_mods) = config.prefix_key();
         crate::kitty_graphics::set_enabled(config.experimental.kitty_graphics);
+        let (agent_commands, agent_command_warnings) = config.agents.command_entries();
+        crate::detect::set_agent_command_registry(agent_commands);
+        for warning in &agent_command_warnings {
+            tracing::warn!("{warning}");
+        }
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
         let render_notify = Arc::new(Notify::new());
         let render_dirty = Arc::new(AtomicBool::new(false));
@@ -624,6 +629,7 @@ impl App {
             pane_borders: config.ui.pane_borders,
             pane_gaps: config.ui.pane_gaps,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
+            hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
@@ -1323,6 +1329,12 @@ impl App {
         let invalid_section =
             |section: &str| invalid_sections.iter().any(|invalid| invalid == section);
 
+        if !invalid_section("agents") {
+            let (agent_commands, agent_warnings) = config.agents.command_entries();
+            crate::detect::set_agent_command_registry(agent_commands);
+            diagnostics.extend(agent_warnings);
+        }
+
         if !invalid_section("keys") {
             match config.live_keybinds_with_diagnostics() {
                 Ok((live, keybind_diagnostics)) => {
@@ -1387,6 +1399,7 @@ impl App {
                 self.state.pane_gaps = config.ui.pane_gaps;
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
+                self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.agent_panel_scroll = 0;
@@ -2256,8 +2269,13 @@ mod tests {
     #[test]
     fn headless_color_picker_accepts_hex_typing() {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app =
-            App::new(&Config::default(), true, None, api_rx, crate::api::EventHub::default());
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
         app.state.workspaces = vec![Workspace::test_new("test")];
         app.state.active = Some(0);
         app.state.selected = 0;
@@ -2282,6 +2300,26 @@ mod tests {
 
         let picker = app.state.color_picker.as_ref().expect("picker open");
         assert_eq!(picker.hex_input, "#abcdef");
+    }
+
+    #[test]
+    fn app_new_populates_agent_command_registry() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut config = Config::default();
+        config.agents.entries.insert(
+            "claude".to_string(),
+            crate::config::model::AgentEntryConfig {
+                commands: vec!["claude-xebia".to_string()],
+                config_dirs: vec![],
+            },
+        );
+        let _app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+        assert_eq!(
+            crate::detect::identify_agent("claude-xebia"),
+            Some(crate::detect::Agent::Claude)
+        );
+        // reset the process-global registry so sibling tests are unaffected
+        crate::detect::set_agent_command_registry([]);
     }
 
     #[test]
@@ -4627,6 +4665,26 @@ last_pane = "prefix+tab"
         app.route_client_input(b"\x1b]".to_vec());
 
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn applying_config_populates_agent_command_registry() {
+        let mut config = crate::config::Config::default();
+        config.agents.entries.insert(
+            "claude".to_string(),
+            crate::config::model::AgentEntryConfig {
+                commands: vec!["claude-xebia".to_string()],
+                config_dirs: vec![],
+            },
+        );
+        let mut app = test_app();
+        let _ = app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(
+            crate::detect::identify_agent("claude-xebia"),
+            Some(crate::detect::Agent::Claude)
+        );
+        // reset global for other tests
+        crate::detect::set_agent_command_registry([]);
     }
 
     #[test]

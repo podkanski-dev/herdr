@@ -7,6 +7,12 @@ pub(crate) struct ClaudeInstallPaths {
 }
 
 #[derive(Debug)]
+pub(crate) struct ClaudeInstallResult {
+    pub installed: Vec<ClaudeInstallPaths>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug)]
 pub(crate) struct CodexInstallPaths {
     pub hook_path: PathBuf,
     pub hooks_path: PathBuf,
@@ -149,6 +155,12 @@ pub(crate) struct ClaudeUninstallResult {
     pub settings_path: PathBuf,
     pub removed_hook_file: bool,
     pub updated_settings: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct ClaudeUninstallSummary {
+    pub results: Vec<ClaudeUninstallResult>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug)]

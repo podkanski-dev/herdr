@@ -277,6 +277,52 @@ pub fn validated_sidebar_bounds(min: u16, max: u16) -> Option<(u16, u16)> {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
+pub struct AgentsConfig {
+    #[serde(flatten)]
+    pub entries: std::collections::BTreeMap<String, AgentEntryConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AgentEntryConfig {
+    /// Extra foreground command names that mean this agent.
+    pub commands: Vec<String>,
+    /// Account config dirs the integration installer should also target.
+    pub config_dirs: Vec<String>,
+}
+
+impl AgentsConfig {
+    /// Resolved `(command, agent)` pairs for the command registry, plus a
+    /// warning per `[agents.<id>]` whose id is not a known agent.
+    pub fn command_entries(&self) -> (Vec<(String, crate::detect::Agent)>, Vec<String>) {
+        let mut entries = Vec::new();
+        let mut warnings = Vec::new();
+        for (agent_id, entry) in &self.entries {
+            let Some(agent) = crate::detect::parse_agent_label(agent_id) else {
+                warnings.push(format!("[agents.{agent_id}]: unknown agent id, ignoring"));
+                continue;
+            };
+            for command in &entry.commands {
+                if command.trim().is_empty() {
+                    continue;
+                }
+                entries.push((command.trim().to_string(), agent));
+            }
+        }
+        (entries, warnings)
+    }
+
+    /// Raw (unexpanded) config-dir strings configured for `agent_id`.
+    pub fn config_dirs_for(&self, agent_id: &str) -> Vec<String> {
+        self.entries
+            .get(agent_id)
+            .map(|entry| entry.config_dirs.clone())
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub onboarding: Option<bool>,
     pub theme: ThemeConfig,
@@ -292,6 +338,7 @@ pub struct Config {
     /// Per-workspace accent colors, keyed by absolute workspace cwd.
     /// Values are curated swatch names or hex (e.g. "blue", "#89b4fa").
     pub workspace_colors: std::collections::BTreeMap<String, String>,
+    pub agents: AgentsConfig,
 }
 
 #[derive(Debug)]
@@ -796,6 +843,8 @@ pub struct UiConfig {
     pub pane_gaps: bool,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
+    /// Hide the tab row when the workspace has one tab. Default: false.
+    pub hide_tab_bar_when_single_tab: bool,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
     /// Accent color for highlights, borders, and navigation UI.
@@ -987,6 +1036,7 @@ impl Default for UiConfig {
             pane_borders: true,
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
+            hide_tab_bar_when_single_tab: false,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             accent: "cyan".into(),
             toast: ToastConfig::default(),
@@ -1198,17 +1248,20 @@ agent_panel_scope = "current"
         assert!(default_config.ui.pane_borders);
         assert!(default_config.ui.pane_gaps);
         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
+        assert!(!default_config.ui.hide_tab_bar_when_single_tab);
 
         let toml = r#"
 [ui]
 pane_borders = false
 pane_gaps = true
 show_agent_labels_on_pane_borders = true
+hide_tab_bar_when_single_tab = true
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(!config.ui.pane_borders);
         assert!(config.ui.pane_gaps);
         assert!(config.ui.show_agent_labels_on_pane_borders);
+        assert!(config.ui.hide_tab_bar_when_single_tab);
     }
 
     #[test]
@@ -1679,6 +1732,33 @@ scrollback_lines = 12345
                 .get("/home/me/api")
                 .map(String::as_str),
             Some("#89b4fa")
+        );
+    }
+
+    #[test]
+    fn agents_config_resolves_commands_and_warns_on_unknown() {
+        let toml = r#"
+[agents.claude]
+commands = ["claude-xebia", "  ", "claude-mtv"]
+config_dirs = ["~/.claude-xebia"]
+
+[agents.notanagent]
+commands = ["whatever"]
+"#;
+        let cfg: Config = toml::from_str(toml).expect("parse");
+        let (entries, warnings) = cfg.agents.command_entries();
+        assert!(entries.contains(&("claude-xebia".to_string(), crate::detect::Agent::Claude)));
+        assert!(entries.contains(&("claude-mtv".to_string(), crate::detect::Agent::Claude)));
+        // blank command dropped
+        assert_eq!(
+            entries.iter().filter(|(c, _)| c.trim().is_empty()).count(),
+            0
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("notanagent"));
+        assert_eq!(
+            cfg.agents.config_dirs_for("claude"),
+            vec!["~/.claude-xebia".to_string()]
         );
     }
 }

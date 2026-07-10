@@ -58,11 +58,22 @@ fn integration_status(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn integration_install(args: &[String]) -> std::io::Result<i32> {
-    let Some(target) = parse_integration_target(args, "install")? else {
+    let Some((target, extra)) = parse_integration_target(args, "install")? else {
         return Ok(2);
     };
 
-    match crate::integration::install_target(target) {
+    let result = if extra.is_empty() {
+        crate::integration::install_target(target)
+    } else {
+        crate::integration::install_claude_extra_dirs(
+            &extra
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    match result {
         Ok(messages) => {
             print_integration_messages(messages);
             Ok(0)
@@ -75,11 +86,22 @@ fn integration_install(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn integration_uninstall(args: &[String]) -> std::io::Result<i32> {
-    let Some(target) = parse_integration_target(args, "uninstall")? else {
+    let Some((target, extra)) = parse_integration_target(args, "uninstall")? else {
         return Ok(2);
     };
 
-    match crate::integration::uninstall_target(target) {
+    let result = if extra.is_empty() {
+        crate::integration::uninstall_target(target)
+    } else {
+        crate::integration::uninstall_claude_extra_dirs(
+            &extra
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    match result {
         Ok(messages) => {
             print_integration_messages(messages);
             Ok(0)
@@ -100,21 +122,19 @@ fn print_integration_messages(messages: Vec<String>) {
 fn parse_integration_target(
     args: &[String],
     action: &str,
-) -> std::io::Result<Option<IntegrationTarget>> {
-    let Some(target) = args.first().map(|arg| arg.as_str()) else {
+) -> std::io::Result<Option<(IntegrationTarget, Vec<std::path::PathBuf>)>> {
+    let print_usage = || {
         eprintln!(
-            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|cursor>"
+            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|cursor> [--config-dir <path>]..."
         );
+    };
+
+    let Some(target_str) = args.first().map(|arg| arg.as_str()) else {
+        print_usage();
         return Ok(None);
     };
-    if args.len() != 1 {
-        eprintln!(
-            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|cursor>"
-        );
-        return Ok(None);
-    }
 
-    let parsed = match target {
+    let parsed = match target_str {
         "pi" => IntegrationTarget::Pi,
         "omp" => IntegrationTarget::Omp,
         "claude" => IntegrationTarget::Claude,
@@ -129,7 +149,7 @@ fn parse_integration_target(
         "qodercli" => IntegrationTarget::Qodercli,
         "cursor" => IntegrationTarget::Cursor,
         _ => {
-            eprintln!("unknown integration target: {target}");
+            eprintln!("unknown integration target: {target_str}");
             eprintln!(
                 "currently supported: pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qodercli, cursor"
             );
@@ -137,7 +157,33 @@ fn parse_integration_target(
         }
     };
 
-    Ok(Some(parsed))
+    let mut extra_dirs: Vec<std::path::PathBuf> = Vec::new();
+    let remaining = &args[1..];
+    let mut i = 0;
+    while i < remaining.len() {
+        match remaining[i].as_str() {
+            "--config-dir" => {
+                if parsed != IntegrationTarget::Claude {
+                    eprintln!("--config-dir is only valid for the claude integration target");
+                    return Ok(None);
+                }
+                i += 1;
+                if i >= remaining.len() {
+                    eprintln!("--config-dir requires a path argument");
+                    print_usage();
+                    return Ok(None);
+                }
+                extra_dirs.push(std::path::PathBuf::from(&remaining[i]));
+            }
+            _ => {
+                print_usage();
+                return Ok(None);
+            }
+        }
+        i += 1;
+    }
+
+    Ok(Some((parsed, extra_dirs)))
 }
 
 fn print_integration_help() {
@@ -169,4 +215,25 @@ fn print_integration_help() {
     eprintln!("  herdr integration uninstall qodercli");
     eprintln!("  herdr integration uninstall cursor");
     eprintln!("  herdr integration status [--outdated-only]");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn parse_target_collects_config_dir_flags() {
+        let args = vec![
+            "claude".to_string(),
+            "--config-dir".to_string(),
+            "/a".to_string(),
+            "--config-dir".to_string(),
+            "/b".to_string(),
+        ];
+        let parsed = parse_integration_target(&args, "install").unwrap().unwrap();
+        assert_eq!(parsed.0, IntegrationTarget::Claude);
+        assert_eq!(parsed.1, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+    }
 }

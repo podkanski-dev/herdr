@@ -2077,6 +2077,14 @@ impl PaneRuntime {
                                         agent_startup_grace_until = None;
                                     }
                                 }
+                                let detected_command =
+                                    agent.is_some().then(|| process_name.clone()).flatten();
+                                let _ = state_events
+                                    .send(AppEvent::AgentCommandDetected {
+                                        pane_id,
+                                        command: detected_command,
+                                    })
+                                    .await;
                                 if let Some(process_name) = process_name {
                                     info!(
                                         pane = pane_id.raw(),

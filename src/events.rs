@@ -85,6 +85,7 @@ pub enum AppEvent {
         seq: Option<u64>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         session_start_source: Option<String>,
+        config_dir: Option<String>,
     },
     /// Display-only agent metadata was reported for a pane.
     HookMetadataReported {
@@ -154,4 +155,9 @@ pub enum AppEvent {
     WorktreeAddFinished(Box<WorktreeAddResult>),
     /// Background `git worktree remove` completed.
     WorktreeRemoveFinished(Box<WorktreeRemoveResult>),
+    /// The foreground command name backing a pane's agent was detected.
+    AgentCommandDetected {
+        pane_id: PaneId,
+        command: Option<String>,
+    },
 }

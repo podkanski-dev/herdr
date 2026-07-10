@@ -1245,6 +1245,10 @@ impl App {
         let Some(agent_label) = normalize_reported_agent_label(&params.agent) else {
             return invalid_agent(id);
         };
+        let config_dir = (agent_label == "claude")
+            .then_some(params.agent_session_path.as_deref())
+            .flatten()
+            .and_then(crate::agent_resume::claude_config_dir_from_transcript_path);
         self.handle_internal_event(crate::events::AppEvent::AgentSessionReported {
             pane_id,
             session_ref: crate::agent_resume::session_ref_from_report(
@@ -1259,6 +1263,7 @@ impl App {
             session_start_source: crate::agent_resume::normalize_session_start_source(
                 params.session_start_source,
             ),
+            config_dir,
         });
 
         encode_success(id, ResponseResult::Ok {})

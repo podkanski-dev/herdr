@@ -13,21 +13,21 @@ use super::config_edit::{
     remove_simple_command_hook,
 };
 use super::env::{
-    claude_dir, codex_dir, copilot_dir, cursor_dir, devin_dir, droid_dir, hermes_dir,
-    hermes_plugin_dir, kilo_dir, kimi_dir, omp_extension_dir, opencode_dir, pi_extension_dir,
-    qodercli_dir,
+    claude_dir, codex_dir, copilot_dir, cursor_dir, devin_dir, droid_dir, expand_tilde_path,
+    hermes_dir, hermes_plugin_dir, kilo_dir, kimi_dir, omp_extension_dir, opencode_dir,
+    pi_extension_dir, qodercli_dir,
 };
 use super::file_ops::{
     make_executable, remove_dir_all_if_exists, remove_file_if_exists, remove_legacy_bash_hook_file,
 };
 use super::types::{
-    ClaudeInstallPaths, ClaudeUninstallResult, CodexInstallPaths, CodexUninstallResult,
-    CopilotInstallPaths, CopilotUninstallResult, CursorInstallPaths, CursorUninstallResult,
-    DevinInstallPaths, DevinUninstallResult, DroidInstallPaths, DroidUninstallResult,
-    HermesInstallPaths, HermesUninstallResult, KiloInstallPaths, KiloUninstallResult,
-    KimiInstallPaths, KimiUninstallResult, OmpInstallPaths, OmpUninstallResult,
-    OpenCodeInstallPaths, OpenCodeUninstallResult, PiUninstallResult, QodercliInstallPaths,
-    QodercliUninstallResult,
+    ClaudeInstallPaths, ClaudeInstallResult, ClaudeUninstallResult, ClaudeUninstallSummary,
+    CodexInstallPaths, CodexUninstallResult, CopilotInstallPaths, CopilotUninstallResult,
+    CursorInstallPaths, CursorUninstallResult, DevinInstallPaths, DevinUninstallResult,
+    DroidInstallPaths, DroidUninstallResult, HermesInstallPaths, HermesUninstallResult,
+    KiloInstallPaths, KiloUninstallResult, KimiInstallPaths, KimiUninstallResult, OmpInstallPaths,
+    OmpUninstallResult, OpenCodeInstallPaths, OpenCodeUninstallResult, PiUninstallResult,
+    QodercliInstallPaths, QodercliUninstallResult,
 };
 use super::{
     CLAUDE_HOOK_ASSET, CLAUDE_HOOK_INSTALL_NAME, CODEX_HOOK_ASSET, CODEX_HOOK_INSTALL_NAME,
@@ -102,8 +102,7 @@ pub(crate) fn remove_legacy_pi_extension_from_omp_dir(dir: &Path) -> io::Result<
     Ok(false)
 }
 
-pub(crate) fn install_claude() -> io::Result<ClaudeInstallPaths> {
-    let dir = claude_dir()?;
+pub(crate) fn install_claude_into(dir: &Path) -> io::Result<ClaudeInstallPaths> {
     if !dir.is_dir() {
         return Err(io::Error::other(format!(
             "claude directory not found at {}. install claude code first",
@@ -160,6 +159,43 @@ pub(crate) fn install_claude() -> io::Result<ClaudeInstallPaths> {
     Ok(ClaudeInstallPaths {
         hook_path,
         settings_path,
+    })
+}
+
+pub(crate) fn install_claude() -> io::Result<ClaudeInstallResult> {
+    let default_dir = claude_dir()?;
+    let loaded = crate::config::Config::load();
+    let extra = loaded.config.agents.config_dirs_for("claude");
+    install_claude_into_dirs(default_dir, &extra)
+}
+
+/// `default_dir` is mandatory (hard error if missing). `extra` dirs are
+/// tilde-expanded, deduped (including against the default), and warn-skipped
+/// when absent.
+pub(crate) fn install_claude_into_dirs(
+    default_dir: PathBuf,
+    extra: &[String],
+) -> io::Result<ClaudeInstallResult> {
+    // default dir missing => hard error (preserves prior behavior + the
+    // "claude directory not found" test)
+    let mut installed = vec![install_claude_into(&default_dir)?];
+    let mut seen: Vec<PathBuf> = vec![default_dir];
+    let mut warnings = Vec::new();
+    for raw in extra {
+        let dir = expand_tilde_path(PathBuf::from(raw)).unwrap_or_else(|_| PathBuf::from(raw));
+        if seen.iter().any(|existing| existing == &dir) {
+            continue; // dedupe, including against the default dir
+        }
+        seen.push(dir.clone());
+        if !dir.is_dir() {
+            warnings.push(format!("skipped {}: directory not found", dir.display()));
+            continue;
+        }
+        installed.push(install_claude_into(&dir)?);
+    }
+    Ok(ClaudeInstallResult {
+        installed,
+        warnings,
     })
 }
 
@@ -553,9 +589,9 @@ pub(crate) fn uninstall_omp() -> io::Result<OmpUninstallResult> {
     })
 }
 
-pub(crate) fn uninstall_claude() -> io::Result<ClaudeUninstallResult> {
-    let hook_path = claude_dir()?.join("hooks").join(CLAUDE_HOOK_INSTALL_NAME);
-    let settings_path = claude_dir()?.join("settings.json");
+pub(crate) fn uninstall_claude_from(dir: &Path) -> io::Result<ClaudeUninstallResult> {
+    let hook_path = dir.join("hooks").join(CLAUDE_HOOK_INSTALL_NAME);
+    let settings_path = dir.join("settings.json");
     let mut updated_settings = false;
 
     if settings_path.is_file() {
@@ -608,6 +644,40 @@ pub(crate) fn uninstall_claude() -> io::Result<ClaudeUninstallResult> {
         removed_hook_file,
         updated_settings,
     })
+}
+
+/// `default_dir` is always processed (uninstall is graceful on a missing dir).
+/// `extra` dirs are tilde-expanded, deduped (including against the default), and
+/// warn-skipped when absent — matching the install mirror.
+pub(crate) fn uninstall_claude_from_dirs(
+    default_dir: PathBuf,
+    extra: &[String],
+) -> io::Result<ClaudeUninstallSummary> {
+    let mut results = vec![uninstall_claude_from(&default_dir)?];
+    let mut seen: Vec<PathBuf> = vec![default_dir];
+    let mut warnings = Vec::new();
+    for raw in extra {
+        let dir = expand_tilde_path(PathBuf::from(raw)).unwrap_or_else(|_| PathBuf::from(raw));
+        if seen.iter().any(|existing| existing == &dir) {
+            continue; // dedupe, including against the default dir
+        }
+        seen.push(dir.clone());
+        if !dir.is_dir() {
+            warnings.push(format!("skipped {}: directory not found", dir.display()));
+            continue;
+        }
+        results.push(uninstall_claude_from(&dir)?);
+    }
+    Ok(ClaudeUninstallSummary { results, warnings })
+}
+
+pub(crate) fn uninstall_claude() -> io::Result<ClaudeUninstallSummary> {
+    let default_dir = claude_dir()?;
+    let extra = crate::config::Config::load()
+        .config
+        .agents
+        .config_dirs_for("claude");
+    uninstall_claude_from_dirs(default_dir, &extra)
 }
 
 pub(crate) fn uninstall_codex() -> io::Result<CodexUninstallResult> {
