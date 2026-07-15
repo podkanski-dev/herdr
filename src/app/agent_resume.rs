@@ -238,6 +238,7 @@ impl App {
             cwd,
             &plan.argv,
             &launch_env,
+            crate::pane::AgentDetection::Enabled,
             self.state.pane_scrollback_limit_bytes,
             host_terminal_theme,
             self.event_tx.clone(),

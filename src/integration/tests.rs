@@ -175,6 +175,7 @@ fn windows_supports_only_cli_hook_integrations() {
     assert!(!integration_target_supported(IntegrationTarget::Hermes));
     assert!(!integration_target_supported(IntegrationTarget::Cursor));
     assert!(!integration_target_supported(IntegrationTarget::Devin));
+    assert!(!integration_target_supported(IntegrationTarget::Mastracode));
 
     assert!(integration_target_supported(IntegrationTarget::Claude));
     assert!(integration_target_supported(IntegrationTarget::Codex));
@@ -203,6 +204,7 @@ fn windows_does_not_offer_unsupported_integrations_even_when_commands_exist() {
     fs::write(bin.join("hermes.exe"), "").unwrap();
     fs::write(bin.join("cursor-agent.cmd"), "@echo off\r\n").unwrap();
     fs::write(bin.join("devin.cmd"), "@echo off\r\n").unwrap();
+    fs::write(bin.join("mastracode.cmd"), "@echo off\r\n").unwrap();
 
     assert!(!integration_target_available(IntegrationTarget::Pi));
     assert!(!integration_target_available(IntegrationTarget::Omp));
@@ -211,6 +213,7 @@ fn windows_does_not_offer_unsupported_integrations_even_when_commands_exist() {
     assert!(!integration_target_available(IntegrationTarget::Hermes));
     assert!(!integration_target_available(IntegrationTarget::Cursor));
     assert!(!integration_target_available(IntegrationTarget::Devin));
+    assert!(!integration_target_available(IntegrationTarget::Mastracode));
 
     if let Some(path) = original_path {
         std::env::set_var("PATH", path);
@@ -724,6 +727,66 @@ fn outdated_integrations_treat_missing_version_marker_as_legacy() {
     assert_eq!(outdated[0].path, extension_path);
     assert_eq!(outdated[0].installed_version, None);
     assert_eq!(outdated[0].expected_version, PI_INTEGRATION_VERSION);
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn outdated_integrations_detect_previous_pi_version() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let ext_dir = home.join(".pi/agent/extensions");
+    fs::create_dir_all(&ext_dir).unwrap();
+    let extension_path = ext_dir.join(PI_EXTENSION_INSTALL_NAME);
+    fs::write(
+        &extension_path,
+        "// HERDR_INTEGRATION_ID=pi\n// HERDR_INTEGRATION_VERSION=4\n",
+    )
+    .unwrap();
+    std::env::set_var("HOME", &home);
+
+    let outdated = outdated_installed_integrations();
+
+    assert_eq!(outdated.len(), 1);
+    assert_eq!(
+        outdated[0].target,
+        crate::api::schema::IntegrationTarget::Pi
+    );
+    assert_eq!(outdated[0].path, extension_path);
+    assert_eq!(outdated[0].installed_version, Some(4));
+    assert_eq!(outdated[0].expected_version, PI_INTEGRATION_VERSION);
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn outdated_integrations_detect_previous_omp_version() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let ext_dir = home.join(".omp/agent/extensions");
+    fs::create_dir_all(&ext_dir).unwrap();
+    let extension_path = ext_dir.join(OMP_EXTENSION_INSTALL_NAME);
+    fs::write(
+        &extension_path,
+        "// HERDR_INTEGRATION_ID=omp\n// HERDR_INTEGRATION_VERSION=4\n",
+    )
+    .unwrap();
+    std::env::set_var("HOME", &home);
+
+    let outdated = outdated_installed_integrations();
+
+    assert_eq!(outdated.len(), 1);
+    assert_eq!(
+        outdated[0].target,
+        crate::api::schema::IntegrationTarget::Omp
+    );
+    assert_eq!(outdated[0].path, extension_path);
+    assert_eq!(outdated[0].installed_version, Some(4));
+    assert_eq!(outdated[0].expected_version, OMP_INTEGRATION_VERSION);
 
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
@@ -2543,6 +2606,48 @@ fn install_hermes_errors_when_config_dir_missing() {
 }
 
 #[test]
+fn bundled_integration_asset_versions_match_expected_versions() {
+    for (name, asset, expected_version) in [
+        ("pi", PI_EXTENSION_ASSET, PI_INTEGRATION_VERSION),
+        ("omp", OMP_EXTENSION_ASSET, OMP_INTEGRATION_VERSION),
+        ("claude", CLAUDE_HOOK_ASSET, CLAUDE_INTEGRATION_VERSION),
+        ("codex", CODEX_HOOK_ASSET, CODEX_INTEGRATION_VERSION),
+        ("kimi", KIMI_HOOK_ASSET, KIMI_INTEGRATION_VERSION),
+        ("copilot", COPILOT_HOOK_ASSET, COPILOT_INTEGRATION_VERSION),
+        ("devin", DEVIN_HOOK_ASSET, DEVIN_INTEGRATION_VERSION),
+        ("droid", DROID_HOOK_ASSET, DROID_INTEGRATION_VERSION),
+        (
+            "opencode",
+            OPENCODE_PLUGIN_ASSET,
+            OPENCODE_INTEGRATION_VERSION,
+        ),
+        ("kilo", KILO_PLUGIN_ASSET, KILO_INTEGRATION_VERSION),
+        (
+            "hermes",
+            HERMES_PLUGIN_INIT_ASSET,
+            HERMES_INTEGRATION_VERSION,
+        ),
+        (
+            "qodercli",
+            QODERCLI_HOOK_ASSET,
+            QODERCLI_INTEGRATION_VERSION,
+        ),
+        ("cursor", CURSOR_HOOK_ASSET, CURSOR_INTEGRATION_VERSION),
+        (
+            "mastracode",
+            MASTRACODE_HOOK_ASSET,
+            MASTRACODE_INTEGRATION_VERSION,
+        ),
+    ] {
+        assert_eq!(
+            parse_integration_version(asset),
+            Some(expected_version),
+            "{name} asset version must match its integration version constant"
+        );
+    }
+}
+
+#[test]
 fn bundled_integration_assets_report_session_refs() {
     assert!(PI_EXTENSION_ASSET.contains("agent_session_path"));
     assert!(PI_EXTENSION_ASSET.contains("agent_session_id"));
@@ -2650,6 +2755,13 @@ fn bundled_integration_assets_report_session_refs() {
     assert!(CURSOR_HOOK_ASSET.contains("sessionStart"));
     assert!(!CURSOR_HOOK_ASSET.contains("\"state\":"));
     assert!(!CURSOR_HOOK_ASSET.contains("pane.release_agent"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("HERDR_INTEGRATION_ID=mastracode"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("HERDR_INTEGRATION_VERSION=1"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("session_id"));
+    assert!(!MASTRACODE_HOOK_ASSET.contains("run_id"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("agent_session_id"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("pane.report_agent"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("pane.release_agent"));
 }
 
 #[test]
@@ -3163,5 +3275,200 @@ fn install_cursor_errors_when_config_dir_missing() {
     );
 
     std::env::remove_var(CURSOR_CONFIG_DIR_ENV_VAR);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_mastracode_writes_hook_and_updates_hooks_json() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let original_home = std::env::var_os("HOME");
+    let mastracode_dir = base.join(".mastracode");
+    fs::create_dir_all(&mastracode_dir).unwrap();
+    fs::write(
+        mastracode_dir.join("hooks.json"),
+        r#"{"PostToolUse":[{"type":"command","command":"echo keep-me"}]}"#,
+    )
+    .unwrap();
+    std::env::set_var("HOME", &base);
+
+    let installed = install_mastracode().unwrap();
+
+    assert_eq!(
+        installed.hook_path,
+        mastracode_dir
+            .join("hooks")
+            .join(MASTRACODE_HOOK_INSTALL_NAME)
+    );
+    assert_eq!(installed.hooks_path, mastracode_dir.join("hooks.json"));
+    assert_eq!(
+        fs::read_to_string(&installed.hook_path).unwrap(),
+        MASTRACODE_HOOK_ASSET
+    );
+
+    let hooks_file: Value =
+        serde_json::from_str(&fs::read_to_string(mastracode_dir.join("hooks.json")).unwrap())
+            .unwrap();
+    let hooks = hooks_file.as_object().unwrap();
+    for (event, action) in MASTRACODE_HOOK_EVENTS {
+        let entries = hooks.get(event).and_then(Value::as_array).unwrap();
+        assert_eq!(entries.len(), 1, "{event} should have one Herdr hook");
+        let command = entries[0].get("command").and_then(Value::as_str).unwrap();
+        assert!(command.starts_with("bash "));
+        assert!(command.contains(MASTRACODE_HOOK_INSTALL_NAME));
+        assert!(command.ends_with(action));
+        assert_eq!(
+            entries[0].get("type").and_then(Value::as_str),
+            Some("command")
+        );
+        assert_eq!(
+            entries[0].get("timeout").and_then(Value::as_u64),
+            Some(MASTRACODE_HOOK_TIMEOUT_MS)
+        );
+    }
+    assert_eq!(
+        hooks["PostToolUse"][0]
+            .get("command")
+            .and_then(Value::as_str),
+        Some("echo keep-me")
+    );
+
+    if let Some(home) = original_home {
+        std::env::set_var("HOME", home);
+    } else {
+        std::env::remove_var("HOME");
+    }
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_mastracode_is_idempotent_for_hook_entries() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let original_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &base);
+
+    install_mastracode().unwrap();
+    install_mastracode().unwrap();
+
+    let hooks_file: Value = serde_json::from_str(
+        &fs::read_to_string(base.join(".mastracode").join("hooks.json")).unwrap(),
+    )
+    .unwrap();
+    let hooks = hooks_file.as_object().unwrap();
+    for (event, _) in MASTRACODE_HOOK_EVENTS {
+        assert_eq!(hooks.get(event).and_then(Value::as_array).unwrap().len(), 1);
+    }
+
+    if let Some(home) = original_home {
+        std::env::set_var("HOME", home);
+    } else {
+        std::env::remove_var("HOME");
+    }
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn uninstall_mastracode_removes_herdr_hooks_and_preserves_others() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let original_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &base);
+
+    install_mastracode().unwrap();
+    let hooks_path = base.join(".mastracode").join("hooks.json");
+    let mut hooks_file: Value =
+        serde_json::from_str(&fs::read_to_string(&hooks_path).unwrap()).unwrap();
+    hooks_file["UserPromptSubmit"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "type": "command", "command": "echo user-defined" }));
+    fs::write(
+        &hooks_path,
+        serde_json::to_string_pretty(&hooks_file).unwrap(),
+    )
+    .unwrap();
+
+    let result = uninstall_mastracode().unwrap();
+    assert!(result.removed_hook_file);
+    assert!(result.updated_hooks);
+    assert!(!base
+        .join(".mastracode")
+        .join("hooks")
+        .join(MASTRACODE_HOOK_INSTALL_NAME)
+        .is_file());
+
+    let hooks_file: Value =
+        serde_json::from_str(&fs::read_to_string(&hooks_path).unwrap()).unwrap();
+    let hooks = hooks_file.as_object().unwrap();
+    for (event, _) in MASTRACODE_HOOK_EVENTS {
+        if event == "UserPromptSubmit" {
+            continue;
+        }
+        assert!(!hooks.contains_key(event), "{event} should be removed");
+    }
+    let user_prompt_submit = hooks
+        .get("UserPromptSubmit")
+        .and_then(Value::as_array)
+        .unwrap();
+    assert_eq!(user_prompt_submit.len(), 1);
+    assert_eq!(
+        user_prompt_submit[0].get("command").and_then(Value::as_str),
+        Some("echo user-defined")
+    );
+
+    if let Some(home) = original_home {
+        std::env::set_var("HOME", home);
+    } else {
+        std::env::remove_var("HOME");
+    }
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_mastracode_errors_when_event_value_not_array() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let original_home = std::env::var_os("HOME");
+    let mastracode_dir = base.join(".mastracode");
+    fs::create_dir_all(&mastracode_dir).unwrap();
+    fs::write(mastracode_dir.join("hooks.json"), r#"{"SessionStart":{}}"#).unwrap();
+    std::env::set_var("HOME", &base);
+
+    let err = install_mastracode().unwrap_err().to_string();
+    assert!(
+        err.contains("hook entries for SessionStart must be an array"),
+        "unexpected error: {err}"
+    );
+
+    if let Some(home) = original_home {
+        std::env::set_var("HOME", home);
+    } else {
+        std::env::remove_var("HOME");
+    }
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn uninstall_mastracode_errors_when_event_value_not_array() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let original_home = std::env::var_os("HOME");
+    let mastracode_dir = base.join(".mastracode");
+    fs::create_dir_all(&mastracode_dir).unwrap();
+    fs::write(mastracode_dir.join("hooks.json"), r#"{"SessionStart":{}}"#).unwrap();
+    std::env::set_var("HOME", &base);
+
+    let err = uninstall_mastracode().unwrap_err().to_string();
+    assert!(
+        err.contains("hook entries for SessionStart must be an array"),
+        "unexpected error: {err}"
+    );
+
+    if let Some(home) = original_home {
+        std::env::set_var("HOME", home);
+    } else {
+        std::env::remove_var("HOME");
+    }
     let _ = fs::remove_dir_all(base);
 }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 15,
+  "protocol": 16,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -101,6 +101,22 @@
               "properties": {
                 "type": {
                   "const": "workspace_updated",
+                  "type": "string"
+                },
+                "workspace": {
+                  "$ref": "#/schemas/event/$defs/WorkspaceInfo"
+                }
+              },
+              "required": [
+                "type",
+                "workspace"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "workspace_metadata_updated",
                   "type": "string"
                 },
                 "workspace": {
@@ -433,6 +449,22 @@
             },
             {
               "properties": {
+                "pane": {
+                  "$ref": "#/schemas/event/$defs/PaneInfo"
+                },
+                "type": {
+                  "const": "pane_updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "pane_id": {
                   "type": "string"
                 },
@@ -594,12 +626,6 @@
                 "agent_status": {
                   "$ref": "#/schemas/event/$defs/AgentStatus"
                 },
-                "custom_status": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "display_agent": {
                   "type": [
                     "string",
@@ -636,6 +662,22 @@
                 "agent_status"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "layout": {
+                  "$ref": "#/schemas/event/$defs/PaneLayoutSnapshot"
+                },
+                "type": {
+                  "const": "layout_updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "layout"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -643,6 +685,7 @@
           "enum": [
             "workspace_created",
             "workspace_updated",
+            "workspace_metadata_updated",
             "workspace_closed",
             "workspace_renamed",
             "workspace_moved",
@@ -657,12 +700,14 @@
             "tab_focused",
             "pane_created",
             "pane_closed",
+            "pane_updated",
             "pane_focused",
             "pane_moved",
             "pane_output_changed",
             "pane_exited",
             "pane_agent_detected",
-            "pane_agent_status_changed"
+            "pane_agent_status_changed",
+            "layout_updated"
           ],
           "type": "string"
         },
@@ -686,12 +731,6 @@
             },
             "agent_status": {
               "$ref": "#/schemas/event/$defs/AgentStatus"
-            },
-            "custom_status": {
-              "type": [
-                "string",
-                "null"
-              ]
             },
             "cwd": {
               "type": [
@@ -728,6 +767,16 @@
               "minimum": 0,
               "type": "integer"
             },
+            "scroll": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/PaneScrollInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "state_labels": {
               "additionalProperties": {
                 "type": "string"
@@ -740,11 +789,33 @@
             "terminal_id": {
               "type": "string"
             },
+            "terminal_title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "terminal_title_stripped": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "title": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "workspace_id": {
               "type": "string"
@@ -760,6 +831,157 @@
             "revision"
           ],
           "type": "object"
+        },
+        "PaneLayoutPane": {
+          "properties": {
+            "focused": {
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "rect": {
+              "$ref": "#/schemas/event/$defs/PaneLayoutRect"
+            }
+          },
+          "required": [
+            "pane_id",
+            "focused",
+            "rect"
+          ],
+          "type": "object"
+        },
+        "PaneLayoutRect": {
+          "properties": {
+            "height": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        "PaneLayoutSnapshot": {
+          "properties": {
+            "area": {
+              "$ref": "#/schemas/event/$defs/PaneLayoutRect"
+            },
+            "focused_pane_id": {
+              "type": "string"
+            },
+            "panes": {
+              "items": {
+                "$ref": "#/schemas/event/$defs/PaneLayoutPane"
+              },
+              "type": "array"
+            },
+            "splits": {
+              "items": {
+                "$ref": "#/schemas/event/$defs/PaneLayoutSplit"
+              },
+              "type": "array"
+            },
+            "tab_id": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string"
+            },
+            "zoomed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "tab_id",
+            "zoomed",
+            "area",
+            "focused_pane_id",
+            "panes",
+            "splits"
+          ],
+          "type": "object"
+        },
+        "PaneLayoutSplit": {
+          "properties": {
+            "direction": {
+              "$ref": "#/schemas/event/$defs/SplitDirection"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ratio": {
+              "format": "float",
+              "type": "number"
+            },
+            "rect": {
+              "$ref": "#/schemas/event/$defs/PaneLayoutRect"
+            }
+          },
+          "required": [
+            "id",
+            "direction",
+            "ratio",
+            "rect"
+          ],
+          "type": "object"
+        },
+        "PaneScrollInfo": {
+          "properties": {
+            "max_offset_from_bottom": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "offset_from_bottom": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "viewport_rows": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "offset_from_bottom",
+            "max_offset_from_bottom",
+            "viewport_rows"
+          ],
+          "type": "object"
+        },
+        "SplitDirection": {
+          "enum": [
+            "right",
+            "down"
+          ],
+          "type": "string"
         },
         "TabInfo": {
           "properties": {
@@ -828,6 +1050,16 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "workspace_id": {
               "type": "string"
@@ -1512,7 +1744,8 @@
             "kilo",
             "hermes",
             "qodercli",
-            "cursor"
+            "cursor",
+            "mastracode"
           ],
           "type": "string"
         },
@@ -1842,6 +2075,92 @@
           ],
           "type": "object"
         },
+        "PaneGraphicsClearParams": {
+          "properties": {
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
+        "PaneGraphicsFormat": {
+          "enum": [
+            "png",
+            "rgb",
+            "rgba"
+          ],
+          "type": "string"
+        },
+        "PaneGraphicsPlacementParams": {
+          "properties": {
+            "grid_cols": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "grid_rows": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "viewport_col": {
+              "default": 0,
+              "format": "int32",
+              "type": "integer"
+            },
+            "viewport_row": {
+              "default": 0,
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "PaneGraphicsSetParams": {
+          "properties": {
+            "data_base64": {
+              "default": "",
+              "type": "string"
+            },
+            "format": {
+              "$ref": "#/schemas/request/$defs/PaneGraphicsFormat"
+            },
+            "image_height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "image_width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "placement": {
+              "$ref": "#/schemas/request/$defs/PaneGraphicsPlacementParams",
+              "default": {
+                "grid_cols": 0,
+                "grid_rows": 0,
+                "viewport_col": 0,
+                "viewport_row": 0
+              }
+            }
+          },
+          "required": [
+            "pane_id",
+            "format",
+            "image_width",
+            "image_height"
+          ],
+          "type": "object"
+        },
         "PaneLayoutParams": {
           "properties": {
             "pane_id": {
@@ -2088,12 +2407,6 @@
                 "null"
               ]
             },
-            "custom_status": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "message": {
               "type": [
                 "string",
@@ -2185,10 +2498,6 @@
                 "null"
               ]
             },
-            "clear_custom_status": {
-              "default": false,
-              "type": "boolean"
-            },
             "clear_display_agent": {
               "default": false,
               "type": "boolean"
@@ -2200,12 +2509,6 @@
             "clear_title": {
               "default": false,
               "type": "boolean"
-            },
-            "custom_status": {
-              "type": [
-                "string",
-                "null"
-              ]
             },
             "display_agent": {
               "type": [
@@ -2239,9 +2542,23 @@
                 "null"
               ]
             },
+            "tokens": {
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "maxProperties": 16,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "ttl_ms": {
               "format": "uint64",
-              "minimum": 0,
+              "maximum": 86400000,
+              "minimum": 1,
               "type": [
                 "integer",
                 "null"
@@ -2735,6 +3052,16 @@
               "default": false,
               "type": "boolean"
             },
+            "height": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/PopupSize"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "placement": {
               "anyOf": [
                 {
@@ -2754,6 +3081,16 @@
                 "null"
               ]
             },
+            "width": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/PopupSize"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "workspace_id": {
               "type": [
                 "string",
@@ -2770,6 +3107,7 @@
         "PluginPanePlacement": {
           "enum": [
             "overlay",
+            "popup",
             "split",
             "tab",
             "zoomed"
@@ -2858,6 +3196,21 @@
           ],
           "type": "object"
         },
+        "PopupSize": {
+          "oneOf": [
+            {
+              "description": "Outer popup size in terminal cells, including the border.",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "Outer popup size as a percentage of the terminal area, for example 80%.",
+              "pattern": "^(100|[1-9][0-9]?)%$",
+              "type": "string"
+            }
+          ]
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -2924,6 +3277,18 @@
               "properties": {
                 "type": {
                   "const": "workspace.updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "workspace.metadata_updated",
                   "type": "string"
                 }
               },
@@ -3103,6 +3468,18 @@
             {
               "properties": {
                 "type": {
+                  "const": "pane.updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
                   "const": "pane.focused",
                   "type": "string"
                 }
@@ -3207,6 +3584,34 @@
               "required": [
                 "type",
                 "pane_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "pane.scroll_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "layout.updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
               ],
               "type": "object"
             }
@@ -3364,6 +3769,52 @@
           "required": [
             "workspace_id",
             "label"
+          ],
+          "type": "object"
+        },
+        "WorkspaceReportMetadataParams": {
+          "properties": {
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "maxProperties": 16,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
+            "ttl_ms": {
+              "format": "uint64",
+              "maximum": 86400000,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "source",
+            "tokens"
           ],
           "type": "object"
         },
@@ -3772,6 +4223,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceMoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.report_metadata",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceReportMetadataParams"
             }
           },
           "required": [
@@ -4455,6 +4922,54 @@
         {
           "properties": {
             "method": {
+              "const": "pane.graphics.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneGraphicsSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.graphics.clear",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneGraphicsClearParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.graphics.info",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.report_agent",
               "type": "string"
             },
@@ -4540,6 +5055,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "popup.close",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
             }
           },
           "required": [
@@ -4839,12 +5370,6 @@
             "agent_status": {
               "$ref": "#/schemas/subscription_event/$defs/AgentStatus"
             },
-            "custom_status": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "display_agent": {
               "type": [
                 "string",
@@ -4937,6 +5462,50 @@
           ],
           "type": "object"
         },
+        "PaneScrollChangedEvent": {
+          "properties": {
+            "pane_id": {
+              "type": "string"
+            },
+            "scroll": {
+              "$ref": "#/schemas/subscription_event/$defs/PaneScrollInfo"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "workspace_id",
+            "scroll"
+          ],
+          "type": "object"
+        },
+        "PaneScrollInfo": {
+          "properties": {
+            "max_offset_from_bottom": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "offset_from_bottom": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "viewport_rows": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "offset_from_bottom",
+            "max_offset_from_bottom",
+            "viewport_rows"
+          ],
+          "type": "object"
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -4960,13 +5529,17 @@
             },
             {
               "$ref": "#/schemas/subscription_event/$defs/PaneAgentStatusChangedEvent"
+            },
+            {
+              "$ref": "#/schemas/subscription_event/$defs/PaneScrollChangedEvent"
             }
           ]
         },
         "SubscriptionEventKind": {
           "enum": [
             "pane.output_matched",
-            "pane.agent_status_changed"
+            "pane.agent_status_changed",
+            "pane.scroll_changed"
           ],
           "type": "string"
         }
@@ -5009,12 +5582,6 @@
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
-            },
-            "custom_status": {
-              "type": [
-                "string",
-                "null"
-              ]
             },
             "cwd": {
               "type": [
@@ -5066,11 +5633,33 @@
             "terminal_id": {
               "type": "string"
             },
+            "terminal_title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "terminal_title_stripped": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "title": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "workspace_id": {
               "type": "string"
@@ -5226,6 +5815,22 @@
               "properties": {
                 "type": {
                   "const": "workspace_updated",
+                  "type": "string"
+                },
+                "workspace": {
+                  "$ref": "#/schemas/success_response/$defs/WorkspaceInfo"
+                }
+              },
+              "required": [
+                "type",
+                "workspace"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "workspace_metadata_updated",
                   "type": "string"
                 },
                 "workspace": {
@@ -5558,6 +6163,22 @@
             },
             {
               "properties": {
+                "pane": {
+                  "$ref": "#/schemas/success_response/$defs/PaneInfo"
+                },
+                "type": {
+                  "const": "pane_updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "pane_id": {
                   "type": "string"
                 },
@@ -5719,12 +6340,6 @@
                 "agent_status": {
                   "$ref": "#/schemas/success_response/$defs/AgentStatus"
                 },
-                "custom_status": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "display_agent": {
                   "type": [
                     "string",
@@ -5761,6 +6376,22 @@
                 "agent_status"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "layout": {
+                  "$ref": "#/schemas/success_response/$defs/PaneLayoutSnapshot"
+                },
+                "type": {
+                  "const": "layout_updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "layout"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -5783,6 +6414,7 @@
           "enum": [
             "workspace_created",
             "workspace_updated",
+            "workspace_metadata_updated",
             "workspace_closed",
             "workspace_renamed",
             "workspace_moved",
@@ -5797,12 +6429,14 @@
             "tab_focused",
             "pane_created",
             "pane_closed",
+            "pane_updated",
             "pane_focused",
             "pane_moved",
             "pane_output_changed",
             "pane_exited",
             "pane_agent_detected",
-            "pane_agent_status_changed"
+            "pane_agent_status_changed",
+            "layout_updated"
           ],
           "type": "string"
         },
@@ -5927,7 +6561,8 @@
             "kilo",
             "hermes",
             "qodercli",
-            "cursor"
+            "cursor",
+            "mastracode"
           ],
           "type": "string"
         },
@@ -6162,12 +6797,6 @@
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
             },
-            "custom_status": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "cwd": {
               "type": [
                 "string",
@@ -6203,6 +6832,16 @@
               "minimum": 0,
               "type": "integer"
             },
+            "scroll": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/PaneScrollInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "state_labels": {
               "additionalProperties": {
                 "type": "string"
@@ -6215,11 +6854,33 @@
             "terminal_id": {
               "type": "string"
             },
+            "terminal_title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "terminal_title_stripped": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "title": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "workspace_id": {
               "type": "string"
@@ -6634,6 +7295,31 @@
             "pane_id",
             "focused_pane_id",
             "layout"
+          ],
+          "type": "object"
+        },
+        "PaneScrollInfo": {
+          "properties": {
+            "max_offset_from_bottom": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "offset_from_bottom": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "viewport_rows": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "offset_from_bottom",
+            "max_offset_from_bottom",
+            "viewport_rows"
           ],
           "type": "object"
         },
@@ -7122,6 +7808,16 @@
                 "null"
               ]
             },
+            "height": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/PopupSize"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "id": {
               "type": "string"
             },
@@ -7140,6 +7836,16 @@
             },
             "title": {
               "type": "string"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/PopupSize"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -7171,6 +7877,7 @@
         "PluginPanePlacement": {
           "enum": [
             "overlay",
+            "popup",
             "split",
             "tab",
             "zoomed"
@@ -7244,6 +7951,21 @@
             "github"
           ],
           "type": "string"
+        },
+        "PopupSize": {
+          "oneOf": [
+            {
+              "description": "Outer popup size in terminal cells, including the border.",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "description": "Outer popup size as a percentage of the terminal area, for example 80%.",
+              "pattern": "^(100|[1-9][0-9]?)%$",
+              "type": "string"
+            }
+          ]
         },
         "ReadFormat": {
           "enum": [
@@ -7852,6 +8574,30 @@
             },
             {
               "properties": {
+                "cell_height_px": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cell_width_px": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "pane_graphics_info",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "cell_width_px",
+                "cell_height_px"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "explain": true,
                 "type": {
                   "const": "agent_explain",
@@ -8292,6 +9038,10 @@
         },
         "ServerCapabilities": {
           "properties": {
+            "detached_server_daemon": {
+              "default": false,
+              "type": "boolean"
+            },
             "live_handoff": {
               "type": "boolean"
             }
@@ -8445,6 +9195,16 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "workspace_id": {
               "type": "string"

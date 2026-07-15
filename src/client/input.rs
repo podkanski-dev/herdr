@@ -39,15 +39,21 @@ pub fn stdin_reader_loop(
     event_tx: mpsc::Sender<ClientLoopEvent>,
     should_quit: &Arc<AtomicBool>,
     host_color_query_sent: bool,
+    host_mouse_capture_active: Arc<AtomicBool>,
 ) {
     #[cfg(windows)]
     {
-        let _ = host_color_query_sent;
+        let _ = (host_color_query_sent, host_mouse_capture_active);
         windows_stdin_reader_loop(event_tx, should_quit);
     }
 
     #[cfg(unix)]
-    unix_stdin_reader_loop(event_tx, should_quit, host_color_query_sent);
+    unix_stdin_reader_loop(
+        event_tx,
+        should_quit,
+        host_color_query_sent,
+        host_mouse_capture_active,
+    );
 }
 
 #[cfg(unix)]
@@ -55,6 +61,7 @@ fn unix_stdin_reader_loop(
     event_tx: mpsc::Sender<ClientLoopEvent>,
     should_quit: &Arc<AtomicBool>,
     host_color_query_sent: bool,
+    host_mouse_capture_active: Arc<AtomicBool>,
 ) {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
@@ -78,7 +85,11 @@ fn unix_stdin_reader_loop(
                     }
                 }
 
-                if stdin_read_ready(&reader, 10) == Some(false) {
+                let timeout_ms = idle_flush_timeout_ms(
+                    &framer,
+                    host_mouse_capture_active.load(Ordering::Acquire),
+                );
+                if stdin_read_ready(&reader, timeout_ms) == Some(false) {
                     let had_pending = framer.has_pending_input();
                     let chunks = framer.flush_timeout();
                     let held_escape = had_pending && chunks.is_empty();
@@ -90,7 +101,12 @@ fn unix_stdin_reader_loop(
                             return;
                         }
                     }
-                    if held_escape && stdin_read_ready(&reader, 10) == Some(false) {
+                    if held_escape
+                        && stdin_read_ready(
+                            &reader,
+                            crate::raw_input::RAW_INPUT_IDLE_FLUSH_TIMEOUT_MS,
+                        ) == Some(false)
+                    {
                         for data in framer.flush_timeout() {
                             if event_tx
                                 .blocking_send(ClientLoopEvent::StdinInput(data))
@@ -109,6 +125,20 @@ fn unix_stdin_reader_loop(
                 break;
             }
         }
+    }
+}
+
+#[cfg(unix)]
+fn idle_flush_timeout_ms(
+    framer: &crate::raw_input::RawInputByteFramer,
+    host_mouse_capture_active: bool,
+) -> i32 {
+    if host_mouse_capture_active
+        && (framer.has_pending_lone_escape() || framer.has_pending_incomplete_sgr_mouse_sequence())
+    {
+        crate::raw_input::MOUSE_ACTIVE_ESCAPE_SEQUENCE_FLUSH_TIMEOUT_MS
+    } else {
+        crate::raw_input::RAW_INPUT_IDLE_FLUSH_TIMEOUT_MS
     }
 }
 
@@ -365,6 +395,43 @@ mod tests {
             ClientLoopEvent::StdinInput(d) => assert_eq!(d, data),
             _ => panic!("expected StdinInput event"),
         }
+    }
+
+    #[test]
+    fn raw_input_idle_flush_timeout_keeps_escape_responsive() {
+        let timeout_ms = std::hint::black_box(crate::raw_input::RAW_INPUT_IDLE_FLUSH_TIMEOUT_MS);
+        assert!(timeout_ms <= 20);
+    }
+
+    #[test]
+    fn mouse_active_escape_sequences_get_longer_reassembly_window() {
+        let mut escape = crate::raw_input::RawInputByteFramer::default();
+        assert!(escape.push(b"\x1b").is_empty());
+        let mut mouse = crate::raw_input::RawInputByteFramer::default();
+        assert!(mouse.push(b"\x1b[<3").is_empty());
+        let mut unrelated = crate::raw_input::RawInputByteFramer::default();
+        assert!(unrelated.push(b"\x1b[49:33;2:").is_empty());
+
+        for framer in [&escape, &mouse, &unrelated] {
+            assert_eq!(
+                idle_flush_timeout_ms(framer, false),
+                crate::raw_input::RAW_INPUT_IDLE_FLUSH_TIMEOUT_MS
+            );
+        }
+        for framer in [&escape, &mouse] {
+            assert_eq!(
+                idle_flush_timeout_ms(framer, true),
+                crate::raw_input::MOUSE_ACTIVE_ESCAPE_SEQUENCE_FLUSH_TIMEOUT_MS
+            );
+        }
+        assert_eq!(
+            idle_flush_timeout_ms(&unrelated, true),
+            crate::raw_input::RAW_INPUT_IDLE_FLUSH_TIMEOUT_MS
+        );
+
+        let mouse_timeout_ms =
+            std::hint::black_box(crate::raw_input::MOUSE_ACTIVE_ESCAPE_SEQUENCE_FLUSH_TIMEOUT_MS);
+        assert!(mouse_timeout_ms > 100);
     }
 }
 

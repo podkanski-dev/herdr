@@ -151,6 +151,13 @@ pub fn plan(
         ("herdr:kimi", "kimi", AgentSessionRefKind::Id) => {
             vec!["kimi".into(), "--session".into(), session_ref.value.clone()]
         }
+        ("herdr:mastracode", "mastracode", AgentSessionRefKind::Id) => {
+            vec![
+                "mastracode".into(),
+                "--thread".into(),
+                session_ref.value.clone(),
+            ]
+        }
         ("herdr:pi", "pi", AgentSessionRefKind::Path | AgentSessionRefKind::Id) => {
             vec!["pi".into(), "--session".into(), session_ref.value.clone()]
         }
@@ -231,6 +238,7 @@ fn is_official_agent_source(source: &str, agent: &str) -> bool {
             | ("herdr:droid", "droid")
             | ("herdr:kimi", "kimi")
             | ("herdr:omp", "omp")
+            | ("herdr:mastracode", "mastracode")
             | ("herdr:pi", "pi")
             | ("herdr:hermes", "hermes")
             | ("herdr:opencode", "opencode")
@@ -376,6 +384,18 @@ mod tests {
             .unwrap()
             .argv,
             vec!["kimi", "--session", "kimi-session"]
+        );
+        assert_eq!(
+            plan(
+                "herdr:mastracode",
+                "mastracode",
+                &AgentSessionRef::id("mastracode-session").unwrap(),
+                None,
+                None
+            )
+            .unwrap()
+            .argv,
+            vec!["mastracode", "--thread", "mastracode-session"]
         );
         assert_eq!(
             plan(
@@ -571,6 +591,16 @@ mod tests {
         assert_eq!(session_ref.kind, AgentSessionRefKind::Id);
         assert_eq!(session_ref.value, "kimi-id");
 
+        let session_ref = session_ref_from_report(
+            "herdr:mastracode",
+            "mastracode",
+            Some("mastracode-id".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(session_ref.kind, AgentSessionRefKind::Id);
+        assert_eq!(session_ref.value, "mastracode-id");
+
         let session_ref =
             session_ref_from_report("herdr:kilo", "kilo", Some("kilo-id".into()), None).unwrap();
         assert_eq!(session_ref.kind, AgentSessionRefKind::Id);
@@ -698,6 +728,13 @@ mod tests {
             None
         )
         .is_none());
+        assert!(session_ref_from_snapshot(
+            "herdr:mastracode",
+            "mastracode",
+            AgentSessionRefKind::Id,
+            "mastracode-session"
+        )
+        .is_some());
         assert!(session_ref_from_snapshot(
             "herdr:hermes",
             "hermes",

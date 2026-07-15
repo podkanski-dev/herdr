@@ -1,12 +1,14 @@
 use std::{
     fs, io,
     io::Write,
-    process::{Command, Stdio},
+    process::Stdio,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use bytes::Bytes;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyCode;
+#[cfg(test)]
+use crossterm::event::KeyEvent;
 use ratatui::layout::Direction;
 
 use crate::{
@@ -19,11 +21,26 @@ use crate::{
     terminal::TerminalRuntimeRegistry,
 };
 
+#[cfg(test)]
 pub(crate) fn terminal_direct_navigation_action(
     state: &AppState,
     key: TerminalKey,
 ) -> Option<NavigateAction> {
     action_for_key(state, key, BindingDispatch::Direct)
+}
+
+pub(crate) fn terminal_direct_non_indexed_navigation_action(
+    state: &AppState,
+    key: TerminalKey,
+) -> Option<NavigateAction> {
+    non_indexed_action_for_key(state, key, BindingDispatch::Direct)
+}
+
+pub(crate) fn terminal_direct_indexed_navigation_action(
+    state: &AppState,
+    key: TerminalKey,
+) -> Option<NavigateAction> {
+    indexed_navigation_action(state, key, BindingDispatch::Direct)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,11 +51,20 @@ pub(crate) enum ActionContext {
 }
 
 impl App {
+    fn cancel_copy_mode_if_active(&mut self) {
+        if self.state.copy_mode.is_some() {
+            self.state.cancel_copy_mode(&self.terminal_runtimes);
+        }
+    }
+
     pub(crate) fn handle_prefix_key(&mut self, raw_key: TerminalKey) {
         let key = raw_key.as_key_event();
         self.state.update_dismissed = true;
 
         if self.state.is_prefix_key(raw_key) {
+            if self.state.copy_mode_pane_is_focused() {
+                self.state.cancel_copy_mode(&self.terminal_runtimes);
+            }
             if !self.pass_through_key_to_focused_pane(raw_key) {
                 leave_command_mode(&mut self.state);
             }
@@ -50,24 +76,48 @@ impl App {
             return;
         }
 
-        if let Some(action) = action_for_key(&self.state, raw_key, BindingDispatch::Prefix) {
-            if action == NavigateAction::EditScrollback {
-                let previous_mode = self.state.mode;
-                self.launch_focused_scrollback_editor();
-                finish_action_context(&mut self.state, ActionContext::Prefix, previous_mode);
-            } else {
-                self.execute_tui_navigate_action(action, ActionContext::Prefix);
-            }
-            self.selection_autoscroll_deadline = None;
+        if let Some(action) =
+            non_indexed_action_for_key(&self.state, raw_key, BindingDispatch::Prefix)
+        {
+            self.execute_prefix_key_action(action);
             return;
         }
 
         if let Some(binding) = command_for_key(&self.state, raw_key, BindingDispatch::Prefix) {
+            self.cancel_copy_mode_if_active();
             self.launch_custom_command(binding, ActionContext::Prefix);
             return;
         }
 
+        if let Some(action) =
+            indexed_navigation_action(&self.state, raw_key, BindingDispatch::Prefix)
+        {
+            self.execute_prefix_key_action(action);
+            return;
+        }
+
         leave_command_mode(&mut self.state);
+    }
+
+    fn execute_prefix_key_action(&mut self, action: NavigateAction) {
+        if action == NavigateAction::EditScrollback {
+            let previous_mode = self.state.mode;
+            self.cancel_copy_mode_if_active();
+            self.launch_focused_scrollback_editor();
+            finish_action_context(&mut self.state, ActionContext::Prefix, previous_mode);
+        } else if action == NavigateAction::CopyMode {
+            self.cancel_copy_mode_if_active();
+            self.execute_tui_navigate_action(action, ActionContext::Prefix);
+        } else if copy_mode_survives_prefix_action(action) {
+            self.execute_tui_navigate_action(action, ActionContext::Prefix);
+            if self.state.copy_mode.is_some() {
+                self.state.sync_copy_mode_with_focus();
+            }
+        } else {
+            self.cancel_copy_mode_if_active();
+            self.execute_tui_navigate_action(action, ActionContext::Prefix);
+        }
+        self.selection_autoscroll_deadline = None;
     }
 
     pub(crate) fn handle_navigate_key(&mut self, raw_key: TerminalKey) {
@@ -79,12 +129,33 @@ impl App {
             return;
         }
 
+        if self
+            .state
+            .keybinds
+            .navigate
+            .workspace_up
+            .matches_direct_key(raw_key)
+        {
+            self.state.move_selected_workspace_by_visible_delta(-1);
+            return;
+        }
+        if self
+            .state
+            .keybinds
+            .navigate
+            .workspace_down
+            .matches_direct_key(raw_key)
+        {
+            self.state.move_selected_workspace_by_visible_delta(1);
+            return;
+        }
+
         if let Some(action) = navigate_reserved_action_for_key(&self.state, raw_key) {
             self.execute_tui_navigate_action(action, ActionContext::Navigate);
             return;
         }
 
-        if let Some(action) = navigate_mode_action_for_key(&self.state, raw_key) {
+        if let Some(action) = navigate_mode_non_indexed_action_for_key(&self.state, raw_key) {
             if action == NavigateAction::EditScrollback {
                 self.launch_focused_scrollback_editor();
             } else {
@@ -96,6 +167,12 @@ impl App {
 
         if let Some(binding) = command_for_key(&self.state, raw_key, BindingDispatch::Prefix) {
             self.launch_custom_command(binding, ActionContext::Navigate);
+            return;
+        }
+
+        if let Some(action) = navigate_mode_indexed_action_for_key(&self.state, raw_key) {
+            self.execute_tui_navigate_action(action, ActionContext::Navigate);
+            self.selection_autoscroll_deadline = None;
         }
     }
 
@@ -107,16 +184,14 @@ impl App {
         let previous_mode = self.state.mode;
         match action {
             NavigateAction::NewWorkspace => {
-                self.dispatch_tui_api_request(
+                self.runtime_workspace_create(
                     "tui.key.workspace.create",
-                    crate::api::schema::Method::WorkspaceCreate(
-                        crate::api::schema::WorkspaceCreateParams {
-                            cwd: None,
-                            focus: true,
-                            label: None,
-                            env: Default::default(),
-                        },
-                    ),
+                    crate::api::schema::WorkspaceCreateParams {
+                        cwd: None,
+                        focus: true,
+                        label: None,
+                        env: Default::default(),
+                    },
                 );
                 leave_navigate_mode(&mut self.state);
             }
@@ -221,17 +296,15 @@ impl App {
                     if self.state.prompt_new_tab_name {
                         super::modal::open_new_tab_dialog(&mut self.state);
                     } else {
-                        self.dispatch_tui_api_request(
+                        self.runtime_tab_create(
                             "tui.key.tab.create",
-                            crate::api::schema::Method::TabCreate(
-                                crate::api::schema::TabCreateParams {
-                                    workspace_id: None,
-                                    cwd: None,
-                                    focus: true,
-                                    label: None,
-                                    env: Default::default(),
-                                },
-                            ),
+                            crate::api::schema::TabCreateParams {
+                                workspace_id: None,
+                                cwd: None,
+                                focus: true,
+                                label: None,
+                                env: Default::default(),
+                            },
                         );
                         leave_navigate_mode(&mut self.state);
                     }
@@ -253,8 +326,9 @@ impl App {
                 }
             }
             NavigateAction::CloseTab => {
-                self.close_active_tab_via_api();
-                leave_navigate_mode(&mut self.state);
+                if !self.close_active_tab_via_api_requires_confirmation() {
+                    leave_navigate_mode(&mut self.state);
+                }
             }
             NavigateAction::RenamePane => {
                 if let Some(pane_id) = self
@@ -297,8 +371,9 @@ impl App {
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::ClosePane => {
-                self.close_focused_pane_via_api();
-                leave_navigate_mode(&mut self.state);
+                if !self.close_focused_pane_via_api_requires_confirmation() {
+                    leave_navigate_mode(&mut self.state);
+                }
             }
             NavigateAction::EditScrollback => {}
             NavigateAction::CopyMode => self.state.enter_copy_mode(&self.terminal_runtimes),
@@ -326,12 +401,7 @@ impl App {
             NavigateAction::Help => super::modal::open_keybind_help(&mut self.state),
             NavigateAction::Settings => super::settings::open_settings(&mut self.state),
             NavigateAction::ReloadConfig => {
-                self.dispatch_tui_api_request(
-                    "tui.server.reload_config",
-                    crate::api::schema::Method::ServerReloadConfig(
-                        crate::api::schema::EmptyParams::default(),
-                    ),
-                );
+                self.runtime_server_reload_config("tui.server.reload_config");
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::OpenNotificationTarget => {
@@ -354,32 +424,22 @@ impl App {
 
     pub(crate) fn focus_workspace_idx_via_api(&mut self, ws_idx: usize) {
         let workspace_id = self.public_workspace_id(ws_idx);
-        self.dispatch_tui_api_request(
-            "tui.workspace.focus",
-            crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
-                workspace_id,
-            }),
-        );
+        self.runtime_workspace_focus("tui.workspace.focus", workspace_id);
     }
 
     pub(crate) fn close_workspace_idx_via_api(&mut self, ws_idx: usize) {
         let workspace_id = self.public_workspace_id(ws_idx);
-        self.dispatch_tui_api_request(
-            "tui.workspace.close",
-            crate::api::schema::Method::WorkspaceClose(crate::api::schema::WorkspaceTarget {
-                workspace_id,
-            }),
-        );
+        self.runtime_workspace_close("tui.workspace.close", workspace_id);
     }
 
     pub(crate) fn move_workspace_via_api(&mut self, source_ws_idx: usize, insert_idx: usize) {
         let workspace_id = self.public_workspace_id(source_ws_idx);
-        self.dispatch_tui_api_request(
+        self.runtime_workspace_move(
             "tui.workspace.move",
-            crate::api::schema::Method::WorkspaceMove(crate::api::schema::WorkspaceMoveParams {
+            crate::api::schema::WorkspaceMoveParams {
                 workspace_id,
                 insert_index: insert_idx,
-            }),
+            },
         );
     }
 
@@ -390,24 +450,31 @@ impl App {
         let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
             return;
         };
-        self.dispatch_tui_api_request(
-            "tui.tab.focus",
-            crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget { tab_id }),
-        );
+        self.runtime_tab_focus("tui.tab.focus", tab_id);
     }
 
-    pub(crate) fn close_active_tab_via_api(&mut self) {
+    pub(crate) fn close_active_tab_via_api_requires_confirmation(&mut self) -> bool {
         let Some(ws_idx) = self.state.active else {
-            return;
+            return false;
         };
+        if self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .is_some_and(|ws| ws.tabs.len() <= 1)
+        {
+            if self.state.confirm_implicit_worktree_group_close(ws_idx) {
+                return true;
+            }
+            self.close_workspace_idx_via_api(ws_idx);
+            return false;
+        }
         let tab_idx = self.state.workspaces[ws_idx].active_tab_index();
         let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
-            return;
+            return false;
         };
-        self.dispatch_tui_api_request(
-            "tui.tab.close",
-            crate::api::schema::Method::TabClose(crate::api::schema::TabTarget { tab_id }),
-        );
+        self.runtime_tab_close("tui.tab.close", tab_id);
+        false
     }
 
     pub(crate) fn move_tab_via_api(
@@ -419,12 +486,12 @@ impl App {
         let Some(tab_id) = self.public_tab_id(ws_idx, source_tab_idx) else {
             return;
         };
-        self.dispatch_tui_api_request(
+        self.runtime_tab_move(
             "tui.tab.move",
-            crate::api::schema::Method::TabMove(crate::api::schema::TabMoveParams {
+            crate::api::schema::TabMoveParams {
                 tab_id,
                 insert_index: insert_idx,
-            }),
+            },
         );
     }
 
@@ -436,10 +503,7 @@ impl App {
         let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) else {
             return;
         };
-        self.dispatch_tui_api_request(
-            "tui.pane.focus",
-            crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id }),
-        );
+        self.runtime_pane_focus("tui.pane.focus", pane_id);
     }
 
     pub(crate) fn focus_pane_direction_via_api(&mut self, direction: NavDirection) {
@@ -447,14 +511,12 @@ impl App {
             self.focus_pane_internal_via_api(ws_idx, target);
             return;
         }
-        self.dispatch_tui_api_request(
+        self.runtime_pane_focus_direction(
             "tui.pane.focus_direction",
-            crate::api::schema::Method::PaneFocusDirection(
-                crate::api::schema::PaneFocusDirectionParams {
-                    pane_id: None,
-                    direction: api_pane_direction(direction),
-                },
-            ),
+            crate::api::schema::PaneFocusDirectionParams {
+                pane_id: None,
+                direction: api_pane_direction(direction),
+            },
         );
     }
 
@@ -463,26 +525,26 @@ impl App {
             let source_pane_id = self.public_pane_id(ws_idx, source);
             let target_pane_id = self.public_pane_id(ws_idx, target);
             if let (Some(source_pane_id), Some(target_pane_id)) = (source_pane_id, target_pane_id) {
-                self.dispatch_tui_api_request(
+                self.runtime_pane_swap(
                     "tui.pane.swap_exact",
-                    crate::api::schema::Method::PaneSwap(crate::api::schema::PaneSwapParams {
+                    crate::api::schema::PaneSwapParams {
                         pane_id: None,
                         direction: None,
                         source_pane_id: Some(source_pane_id),
                         target_pane_id: Some(target_pane_id),
-                    }),
+                    },
                 );
                 return;
             }
         }
-        self.dispatch_tui_api_request(
+        self.runtime_pane_swap(
             "tui.pane.swap",
-            crate::api::schema::Method::PaneSwap(crate::api::schema::PaneSwapParams {
+            crate::api::schema::PaneSwapParams {
                 pane_id: None,
                 direction: Some(api_pane_direction(direction)),
                 source_pane_id: None,
                 target_pane_id: None,
-            }),
+            },
         );
     }
 
@@ -490,9 +552,9 @@ impl App {
         &mut self,
         direction: crate::api::schema::SplitDirection,
     ) {
-        self.dispatch_tui_api_request(
+        self.runtime_pane_split(
             "tui.pane.split",
-            crate::api::schema::Method::PaneSplit(crate::api::schema::PaneSplitParams {
+            crate::api::schema::PaneSplitParams {
                 workspace_id: None,
                 target_pane_id: None,
                 direction,
@@ -500,44 +562,40 @@ impl App {
                 cwd: None,
                 focus: true,
                 env: Default::default(),
-            }),
+            },
         );
     }
 
-    pub(crate) fn close_focused_pane_via_api(&mut self) {
+    pub(crate) fn close_focused_pane_via_api_requires_confirmation(&mut self) -> bool {
         let Some((ws_idx, pane_id)) = self.focused_pane_target() else {
-            return;
+            return false;
         };
         let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) else {
-            return;
+            return false;
         };
-        self.dispatch_tui_api_request(
-            "tui.pane.close",
-            crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget { pane_id }),
-        );
+        self.runtime_pane_close("tui.pane.close", pane_id);
+        self.state.mode == Mode::ConfirmClose
     }
 
     pub(crate) fn zoom_focused_pane_via_api(&mut self) {
-        self.dispatch_tui_api_request(
+        self.runtime_pane_zoom(
             "tui.pane.zoom",
-            crate::api::schema::Method::PaneZoom(crate::api::schema::PaneZoomParams {
+            crate::api::schema::PaneZoomParams {
                 pane_id: None,
                 mode: crate::api::schema::PaneZoomMode::Toggle,
-            }),
+            },
         );
     }
 
     pub(crate) fn set_split_ratio_via_api(&mut self, path: Vec<bool>, ratio: f32) {
-        self.dispatch_tui_api_request(
+        self.runtime_layout_set_split_ratio(
             "tui.layout.set_split_ratio",
-            crate::api::schema::Method::LayoutSetSplitRatio(
-                crate::api::schema::LayoutSetSplitRatioParams {
-                    tab_id: None,
-                    pane_id: None,
-                    path,
-                    ratio,
-                },
-            ),
+            crate::api::schema::LayoutSetSplitRatioParams {
+                tab_id: None,
+                pane_id: None,
+                path,
+                ratio,
+            },
         );
     }
 
@@ -720,6 +778,7 @@ impl App {
             crate::config::CustomCommandAction::Pane => {
                 self.spawn_pane_command(&binding.command, Vec::new())
             }
+            crate::config::CustomCommandAction::Popup => self.spawn_custom_popup_command(&binding),
             crate::config::CustomCommandAction::PluginAction => self
                 .invoke_plugin_action_from_keybind(binding.command.clone())
                 .map_err(std::io::Error::other),
@@ -738,6 +797,21 @@ impl App {
                 finish_custom_command_context(&mut self.state, context, previous_mode);
             }
         }
+    }
+
+    fn spawn_custom_popup_command(
+        &mut self,
+        binding: &crate::config::CustomCommandKeybind,
+    ) -> io::Result<()> {
+        self.spawn_popup_shell_command(
+            &binding.command,
+            None,
+            self.custom_command_env().0,
+            crate::app::popup::PopupGeometry {
+                width: binding.width,
+                height: binding.height,
+            },
+        )
     }
 
     fn custom_command_env(&self) -> (Vec<(String, String)>, Option<std::path::PathBuf>) {
@@ -785,13 +859,11 @@ impl App {
     }
 
     fn spawn_custom_command(
-        &self,
+        &mut self,
         binding: &crate::config::CustomCommandKeybind,
     ) -> std::io::Result<()> {
-        let mut command = Command::new("/bin/sh");
+        let mut command = crate::platform::detached_custom_command_process(&binding.command);
         command
-            .arg("-lc")
-            .arg(&binding.command)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -800,7 +872,8 @@ impl App {
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
-        command.spawn()?;
+        let child = command.spawn()?;
+        self.detached_custom_command_children.push(child);
         Ok(())
     }
 
@@ -842,14 +915,27 @@ impl App {
 
         let path = write_scrollback_temp_file(&scrollback)?;
 
-        let quoted_path = shell_quote(&path.display().to_string());
-        let command = format!(
-            r#"scrollback_file={quoted_path}; eval "${{EDITOR:-vi}} \"\$scrollback_file\""; status=$?; rm -f "$scrollback_file"; exit $status"#
-        );
-        if let Err(err) = self.spawn_pane_command(&command, vec![path.clone()]) {
-            let _ = fs::remove_file(&path);
-            return Err(err);
-        }
+        let argv = match crate::platform::scrollback_editor_argv(&path) {
+            Ok(argv) => argv,
+            Err(err) => {
+                let _ = fs::remove_file(&path);
+                return Err(err);
+            }
+        };
+        let (env, _) = self.custom_command_env();
+        let new_pane = match self.spawn_overlay_argv_command(&argv, None, env, vec![path.clone()]) {
+            Ok((_, new_pane)) => new_pane,
+            Err(err) => {
+                let _ = fs::remove_file(&path);
+                return Err(err);
+            }
+        };
+        let terminal_id = new_pane.terminal.id.clone();
+        self.terminal_runtimes
+            .insert(terminal_id.clone(), new_pane.runtime);
+        self.state
+            .remove_alias_shadowed_by_new_pane(new_pane.pane_id);
+        self.state.terminals.insert(terminal_id, new_pane.terminal);
 
         if let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) {
             self.state.toast = Some(crate::app::state::ToastNotification {
@@ -1048,6 +1134,7 @@ pub(crate) fn command_for_key(
         .cloned()
 }
 
+#[cfg(test)]
 pub(super) fn handle_navigate_reserved_key(state: &mut AppState, key: TerminalKey) -> bool {
     let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
     if modifiers.is_empty() {
@@ -1180,7 +1267,7 @@ pub(super) fn api_pane_direction(direction: NavDirection) -> crate::api::schema:
     }
 }
 
-#[allow(dead_code)] // exercised in input unit tests; production uses App::handle_navigate_key
+#[cfg(test)]
 pub(crate) fn handle_navigate_key(state: &mut AppState, key: KeyEvent) {
     let mut terminal_runtimes = TerminalRuntimeRegistry::new();
     state.update_dismissed = true;
@@ -1254,6 +1341,29 @@ pub(crate) enum NavigateAction {
     OpenNavigator,
 }
 
+fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
+    matches!(
+        action,
+        NavigateAction::SwitchWorkspace(_)
+            | NavigateAction::SwitchTab(_)
+            | NavigateAction::FocusAgent(_)
+            | NavigateAction::PreviousWorkspace
+            | NavigateAction::NextWorkspace
+            | NavigateAction::PreviousAgent
+            | NavigateAction::NextAgent
+            | NavigateAction::PreviousTab
+            | NavigateAction::NextTab
+            | NavigateAction::FocusPaneLeft
+            | NavigateAction::FocusPaneDown
+            | NavigateAction::FocusPaneUp
+            | NavigateAction::FocusPaneRight
+            | NavigateAction::CyclePaneNext
+            | NavigateAction::CyclePanePrevious
+            | NavigateAction::LastPane
+            | NavigateAction::OpenNotificationTarget
+    )
+}
+
 fn indexed_navigation_action(
     state: &AppState,
     key: TerminalKey,
@@ -1301,15 +1411,21 @@ fn action_matches(
     }
 }
 
+#[cfg(test)]
 fn action_for_key(
     state: &AppState,
     key: TerminalKey,
     dispatch: BindingDispatch,
 ) -> Option<NavigateAction> {
-    if let Some(action) = indexed_navigation_action(state, key, dispatch) {
-        return Some(action);
-    }
+    non_indexed_action_for_key(state, key, dispatch)
+        .or_else(|| indexed_navigation_action(state, key, dispatch))
+}
 
+fn non_indexed_action_for_key(
+    state: &AppState,
+    key: TerminalKey,
+    dispatch: BindingDispatch,
+) -> Option<NavigateAction> {
     let kb = &state.keybinds;
     for (bindings, action) in [
         (&kb.help, NavigateAction::Help),
@@ -1365,6 +1481,7 @@ fn action_for_key(
     None
 }
 
+#[cfg(test)]
 fn navigate_mode_action_for_key(state: &AppState, key: TerminalKey) -> Option<NavigateAction> {
     let action = action_for_key(state, key, BindingDispatch::Prefix)?;
     if matches!(
@@ -1379,6 +1496,30 @@ fn navigate_mode_action_for_key(state: &AppState, key: TerminalKey) -> Option<Na
     Some(action)
 }
 
+fn navigate_mode_non_indexed_action_for_key(
+    state: &AppState,
+    key: TerminalKey,
+) -> Option<NavigateAction> {
+    let action = non_indexed_action_for_key(state, key, BindingDispatch::Prefix)?;
+    if matches!(
+        action,
+        NavigateAction::FocusPaneLeft
+            | NavigateAction::FocusPaneDown
+            | NavigateAction::FocusPaneUp
+            | NavigateAction::FocusPaneRight
+    ) {
+        return None;
+    }
+    Some(action)
+}
+
+fn navigate_mode_indexed_action_for_key(
+    state: &AppState,
+    key: TerminalKey,
+) -> Option<NavigateAction> {
+    indexed_navigation_action(state, key, BindingDispatch::Prefix)
+}
+
 #[cfg(test)]
 pub(super) fn execute_navigate_action(state: &mut AppState, action: NavigateAction) {
     let mut terminal_runtimes = TerminalRuntimeRegistry::new();
@@ -1390,6 +1531,7 @@ pub(super) fn execute_navigate_action(state: &mut AppState, action: NavigateActi
     );
 }
 
+#[cfg(test)]
 pub(super) fn execute_navigate_action_in_context(
     state: &mut AppState,
     terminal_runtimes: &mut TerminalRuntimeRegistry,
@@ -1649,10 +1791,12 @@ fn finish_custom_command_context(
 }
 
 fn leave_command_mode(state: &mut AppState) {
-    state.mode = if state.active.is_some() {
-        Mode::Terminal
+    if state.copy_mode_pane_is_focused() {
+        state.mode = Mode::Copy;
+    } else if state.active.is_some() {
+        state.mode = Mode::Terminal;
     } else {
-        Mode::Navigate
+        state.mode = Mode::Navigate;
     };
 }
 
@@ -1699,22 +1843,6 @@ fn unique_scrollback_path(attempt: u32) -> std::path::PathBuf {
     ))
 }
 
-fn shell_quote(value: &str) -> String {
-    if !value.is_empty()
-        && value.chars().all(|ch| {
-            ch.is_ascii_alphanumeric()
-                || matches!(
-                    ch,
-                    '@' | '%' | '_' | '+' | '=' | ':' | ',' | '.' | '/' | '-'
-                )
-        })
-    {
-        return value.to_string();
-    }
-
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 #[cfg(test)]
 mod tests {
     #[cfg(unix)]
@@ -1739,6 +1867,22 @@ mod tests {
             checkout_path: format!("/repo/worktree-{ws_idx}").into(),
             is_linked_worktree: ws_idx != 0,
         });
+    }
+
+    fn app_with_test_workspaces(names: &[&str]) -> App {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = names.iter().map(|name| Workspace::test_new(name)).collect();
+        app.state.ensure_test_terminals();
+        app.state.active = (!app.state.workspaces.is_empty()).then_some(0);
+        app.state.selected = 0;
+        app
     }
 
     #[test]
@@ -2321,6 +2465,113 @@ last_pane = "prefix+tab"
         assert_eq!(action, Some(NavigateAction::SwitchTab(2)));
     }
 
+    #[test]
+    fn prefix_shift_indexed_workspace_shortcut_maps_shifted_symbol_key() {
+        let mut state = state_with_workspaces(&["one", "two"]);
+        let config: Config =
+            toml::from_str("[keys]\nswitch_workspace = \"prefix+shift+1..9\"\n").unwrap();
+        state.keybinds.switch_workspace = config.keybinds().switch_workspace;
+
+        let action = action_for_key(
+            &state,
+            TerminalKey::new(KeyCode::Char('@'), KeyModifiers::empty()),
+            BindingDispatch::Prefix,
+        );
+
+        assert_eq!(action, Some(NavigateAction::SwitchWorkspace(1)));
+    }
+
+    #[test]
+    fn literal_symbol_binding_takes_precedence_over_shifted_indexed_alias() {
+        let mut state = state_with_workspaces(&["one", "two"]);
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+help = "prefix+!"
+switch_workspace = "prefix+shift+1..9"
+"#,
+        )
+        .unwrap();
+        state.keybinds = config.keybinds();
+
+        let action = action_for_key(
+            &state,
+            TerminalKey::new(KeyCode::Char('!'), KeyModifiers::empty()),
+            BindingDispatch::Prefix,
+        );
+
+        assert_eq!(action, Some(NavigateAction::Help));
+    }
+
+    #[test]
+    fn literal_symbol_custom_command_is_visible_before_shifted_indexed_alias() {
+        let mut state = state_with_workspaces(&["one", "two"]);
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+switch_workspace = "prefix+shift+1..9"
+
+[[keys.command]]
+key = "prefix+!"
+command = "echo literal"
+"#,
+        )
+        .unwrap();
+        state.keybinds = config.keybinds();
+
+        let key = TerminalKey::new(KeyCode::Char('!'), KeyModifiers::empty());
+        assert!(command_for_key(&state, key, BindingDispatch::Prefix).is_some());
+        assert_eq!(
+            indexed_navigation_action(&state, key, BindingDispatch::Prefix),
+            Some(NavigateAction::SwitchWorkspace(0))
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn literal_symbol_custom_command_runs_before_shifted_indexed_alias() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.state.active = Some(1);
+        app.state.selected = 1;
+        app.state.mode = Mode::Terminal;
+
+        let output_path = unique_temp_path("literal-symbol-custom-command");
+        let config: Config = toml::from_str(&format!(
+            r#"
+[keys]
+switch_workspace = "prefix+shift+1..9"
+
+[[keys.command]]
+key = "prefix+!"
+command = "printf literal > '{}'"
+"#,
+            output_path.display()
+        ))
+        .unwrap();
+        app.state.keybinds = config.keybinds();
+
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(KeyCode::Char('!'), KeyModifiers::empty()))
+            .await;
+
+        assert_eq!(wait_for_file(&output_path), "literal");
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.mode, Mode::Terminal);
+        let _ = std::fs::remove_file(output_path);
+    }
+
     #[tokio::test]
     async fn navigate_mode_runs_prefix_action_rhs_without_pressing_prefix_again() {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2422,6 +2673,37 @@ last_pane = "prefix+tab"
         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('P'), KeyModifiers::empty()));
 
         assert_eq!(app.state.mode, Mode::RenamePane);
+    }
+
+    #[test]
+    fn app_navigate_mode_workspace_down_moves_selection() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        app.state.mode = Mode::Navigate;
+
+        app.handle_navigate_key(TerminalKey::new(KeyCode::Down, KeyModifiers::empty()));
+
+        assert_eq!(app.state.selected, 1);
+        assert_eq!(app.state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn app_navigate_mode_workspace_keys_are_configurable() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+navigate_workspace_down = "j"
+navigate_pane_down = "ctrl+j"
+"#,
+        )
+        .unwrap();
+        app.state.keybinds = config.keybinds();
+        app.state.mode = Mode::Navigate;
+
+        app.handle_navigate_key(TerminalKey::new(KeyCode::Char('j'), KeyModifiers::empty()));
+
+        assert_eq!(app.state.selected, 1);
+        assert_eq!(app.state.mode, Mode::Navigate);
     }
 
     #[tokio::test]
@@ -2629,6 +2911,38 @@ last_pane = "prefix+tab"
         assert_eq!(state.workspaces.len(), 2);
     }
 
+    #[test]
+    fn tui_close_tab_last_parent_group_workspace_opens_confirmation_via_api() {
+        let mut app = app_with_test_workspaces(&["main", "issue"]);
+        mark_worktree_space_member(&mut app.state, 0, "repo-key");
+        mark_worktree_space_member(&mut app.state, 1, "repo-key");
+        app.state.active = Some(0);
+        app.state.selected = 1;
+        app.state.mode = Mode::Navigate;
+
+        app.execute_tui_navigate_action(NavigateAction::CloseTab, ActionContext::Navigate);
+
+        assert_eq!(app.state.selected, 0);
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.workspaces.len(), 2);
+    }
+
+    #[test]
+    fn tui_close_pane_last_parent_group_pane_opens_confirmation_via_api() {
+        let mut app = app_with_test_workspaces(&["main", "issue"]);
+        mark_worktree_space_member(&mut app.state, 0, "repo-key");
+        mark_worktree_space_member(&mut app.state, 1, "repo-key");
+        app.state.active = Some(0);
+        app.state.selected = 1;
+        app.state.mode = Mode::Navigate;
+
+        app.execute_tui_navigate_action(NavigateAction::ClosePane, ActionContext::Navigate);
+
+        assert_eq!(app.state.selected, 0);
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.workspaces.len(), 2);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn custom_command_runs_from_prefix_key_in_navigate_mode() {
@@ -2646,9 +2960,11 @@ last_pane = "prefix+tab"
         app.state.mode = Mode::Terminal;
 
         let output_path = unique_temp_path("custom-command-keybind");
+        let release_path = unique_temp_path("custom-command-release");
         let command = format!(
-            "printf '%s\\n%s\\n%s\\n' \"$HERDR_ACTIVE_WORKSPACE_ID\" \"$HERDR_ACTIVE_TAB_ID\" \"$HERDR_ACTIVE_PANE_ID\" > '{}'",
-            output_path.display()
+            "printf '%s\\n%s\\n%s\\n%s\\n' \"$$\" \"$HERDR_ACTIVE_WORKSPACE_ID\" \"$HERDR_ACTIVE_TAB_ID\" \"$HERDR_ACTIVE_PANE_ID\" > '{}'; i=0; while [ ! -e '{}' ] && [ \"$i\" -lt 250 ]; do sleep 0.02; i=$((i + 1)); done",
+            output_path.display(),
+            release_path.display(),
         );
         app.state.keybinds.custom_commands = vec![crate::config::CustomCommandKeybind {
             bindings: crate::config::ActionKeybinds::prefix("m"),
@@ -2656,6 +2972,8 @@ last_pane = "prefix+tab"
             command,
             action: crate::config::CustomCommandAction::Shell,
             description: None,
+            width: None,
+            height: None,
         }];
 
         app.handle_key(TerminalKey::new(
@@ -2665,18 +2983,48 @@ last_pane = "prefix+tab"
         .await;
         assert_eq!(app.state.mode, Mode::Prefix);
 
+        let launch_started = std::time::Instant::now();
         app.handle_key(TerminalKey::new(KeyCode::Char('m'), KeyModifiers::empty()))
             .await;
+        assert!(launch_started.elapsed() < Duration::from_secs(2));
 
         let content = wait_for_file(&output_path);
         let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0], app.state.workspaces[0].id);
-        assert_eq!(lines[1], format!("{}:t1", app.state.workspaces[0].id));
-        assert_eq!(lines[2], format!("{}:p1", app.state.workspaces[0].id));
+        assert_eq!(lines.len(), 4);
+        let pid = lines[0]
+            .parse::<u32>()
+            .expect("command should report its pid");
+        assert!(crate::platform::process_exists(pid));
+        assert_eq!(lines[1], app.state.workspaces[0].id);
+        assert_eq!(lines[2], format!("{}:t1", app.state.workspaces[0].id));
+        assert_eq!(lines[3], format!("{}:p1", app.state.workspaces[0].id));
         assert_eq!(app.state.mode, Mode::Terminal);
 
+        std::fs::write(&release_path, b"release").expect("release command");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while crate::platform::process_exists(pid) && tokio::time::Instant::now() < deadline {
+            app.reap_finished_custom_commands();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        app.reap_finished_custom_commands();
+        let reaped_by_runtime = !crate::platform::process_exists(pid);
+        if !reaped_by_runtime {
+            if let Some(child) = app
+                .detached_custom_command_children
+                .iter_mut()
+                .find(|child| child.id() == pid)
+            {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        assert!(
+            reaped_by_runtime,
+            "detached command child {pid} was not reaped"
+        );
+
         let _ = std::fs::remove_file(output_path);
+        let _ = std::fs::remove_file(release_path);
     }
 
     #[cfg(unix)]
@@ -2718,6 +3066,8 @@ last_pane = "prefix+tab"
             command,
             action: crate::config::CustomCommandAction::Pane,
             description: None,
+            width: None,
+            height: None,
         }];
 
         app.handle_key(TerminalKey::new(
@@ -2819,6 +3169,13 @@ last_pane = "prefix+tab"
         assert!(content.contains("alpha"));
         assert!(content.contains("beta"));
         assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(
+            app.state.terminals.values().any(|terminal| terminal
+                .launch_argv
+                .as_ref()
+                .is_some_and(|argv| argv.first().is_some_and(|program| program == "/bin/sh"))),
+            "scrollback editor should launch through argv overlay path"
+        );
 
         let _ = std::fs::remove_file(output_path);
     }

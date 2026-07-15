@@ -125,7 +125,7 @@ fn parse_integration_target(
 ) -> std::io::Result<Option<(IntegrationTarget, Vec<std::path::PathBuf>)>> {
     let print_usage = || {
         eprintln!(
-            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|cursor> [--config-dir <path>]..."
+            "usage: herdr integration {action} <pi|omp|claude|codex|copilot|devin|droid|kimi|opencode|kilo|hermes|qodercli|cursor|mastracode> [--config-dir <path>]..."
         );
     };
 
@@ -148,10 +148,11 @@ fn parse_integration_target(
         "hermes" => IntegrationTarget::Hermes,
         "qodercli" => IntegrationTarget::Qodercli,
         "cursor" => IntegrationTarget::Cursor,
+        "mastracode" => IntegrationTarget::Mastracode,
         _ => {
             eprintln!("unknown integration target: {target_str}");
             eprintln!(
-                "currently supported: pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qodercli, cursor"
+                "currently supported: pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qodercli, cursor, mastracode"
             );
             return Ok(None);
         }
@@ -201,6 +202,7 @@ fn print_integration_help() {
     eprintln!("  herdr integration install hermes");
     eprintln!("  herdr integration install qodercli");
     eprintln!("  herdr integration install cursor");
+    eprintln!("  herdr integration install mastracode");
     eprintln!("  herdr integration uninstall pi");
     eprintln!("  herdr integration uninstall omp");
     eprintln!("  herdr integration uninstall claude");
@@ -214,6 +216,7 @@ fn print_integration_help() {
     eprintln!("  herdr integration uninstall hermes");
     eprintln!("  herdr integration uninstall qodercli");
     eprintln!("  herdr integration uninstall cursor");
+    eprintln!("  herdr integration uninstall mastracode");
     eprintln!("  herdr integration status [--outdated-only]");
 }
 

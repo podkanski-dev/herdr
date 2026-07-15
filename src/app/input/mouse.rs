@@ -677,12 +677,14 @@ impl AppState {
                         mouse.row - info.inner_rect.y,
                         mouse.column - info.inner_rect.x,
                     );
-                    self.selection = Some(Selection::anchor(
-                        info.id,
-                        row,
-                        col,
-                        self.pane_scroll_metrics(terminal_runtimes, info.id),
-                    ));
+                    if self.copy_on_select {
+                        self.selection = Some(Selection::anchor(
+                            info.id,
+                            row,
+                            col,
+                            self.pane_scroll_metrics(terminal_runtimes, info.id),
+                        ));
+                    }
                     if let Some(ws_idx) = self.active {
                         return Some(MouseAction::FocusPane {
                             ws_idx,
@@ -974,6 +976,14 @@ impl AppState {
                 self.selection = None;
                 self.selection_autoscroll = None;
                 self.handle_terminal_wheel(terminal_runtimes, mouse);
+            }
+
+            MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight
+                if self.mode == Mode::Terminal && !in_sidebar =>
+            {
+                if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {
+                    self.forward_pane_reported_wheel(terminal_runtimes, &info, mouse);
+                }
             }
 
             MouseEventKind::ScrollUp if in_sidebar => {
@@ -1463,6 +1473,7 @@ impl AppState {
             && rect_contains(self.view.toast_hit_area, col, row)
     }
 
+    #[cfg(test)]
     pub(crate) fn focus_toast_target(&mut self) {
         let Some(target) = self.toast.as_ref().and_then(|toast| toast.target.clone()) else {
             return;
@@ -1480,7 +1491,7 @@ impl AppState {
 
         self.focus_pane_in_workspace(ws_idx, target.pane_id);
         self.toast = None;
-        self.mode = Mode::Terminal;
+        self.settle_terminal_mode_after_focus();
     }
 
     pub(crate) fn scroll_pane_up(
@@ -1772,11 +1783,13 @@ impl AppState {
         pane_id: crate::layout::PaneId,
         offset_from_bottom: usize,
     ) {
-        if let Some(ws_idx) = self.active {
-            if let Some(rt) = self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, pane_id)
-            {
-                rt.set_scroll_offset_from_bottom(offset_from_bottom);
-            }
+        for ws_idx in 0..self.workspaces.len() {
+            let Some(rt) = self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, pane_id)
+            else {
+                continue;
+            };
+            rt.set_scroll_offset_from_bottom(offset_from_bottom);
+            return;
         }
     }
 
@@ -1885,6 +1898,16 @@ mod tests {
         workspace::Workspace,
     };
 
+    fn mark_worktree_space_member(workspace: &mut Workspace, ws_idx: usize, key: &str) {
+        workspace.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: key.into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: format!("/repo/worktree-{ws_idx}").into(),
+            is_linked_worktree: ws_idx != 0,
+        });
+    }
+
     #[tokio::test]
     async fn terminal_wheel_uses_configured_mouse_scroll_lines() {
         let mut app = app_for_mouse_test();
@@ -1921,6 +1944,103 @@ mod tests {
             .and_then(crate::terminal::TerminalRuntime::scroll_metrics)
             .expect("scroll metrics after wheel");
         assert_eq!(metrics.offset_from_bottom, 7);
+    }
+
+    #[tokio::test]
+    async fn mouse_dispatcher_forwards_horizontal_wheel_to_mouse_reporting_pane() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1000h\x1b[?1006h",
+                4,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+        assert!(
+            app.state.mouse_capture,
+            "reproduction must use the default Herdr mouse dispatcher"
+        );
+
+        let outer_column = info.inner_rect.x + 2;
+        let outer_row = info.inner_rect.y + 3;
+        for (button, expected_kind, ingress) in [
+            (66, MouseEventKind::ScrollLeft, "monolithic"),
+            (67, MouseEventKind::ScrollRight, "headless"),
+        ] {
+            let input = format!("\x1b[<{button};{};{}M", outer_column + 1, outer_row + 1);
+            let mut events = crate::raw_input::parse_raw_input_bytes_sync(input.as_bytes());
+            let event = events
+                .pop()
+                .expect("horizontal SGR wheel input should parse");
+            let crate::raw_input::RawInputEvent::Mouse(mouse) = &event else {
+                panic!("expected parsed mouse event");
+            };
+            assert!(events.is_empty(), "expected one parsed mouse event");
+            assert_eq!(mouse.kind, expected_kind);
+
+            if ingress == "monolithic" {
+                assert!(app.handle_raw_input_event(event).await);
+            } else {
+                app.route_client_events(vec![event], false);
+            }
+
+            assert_eq!(
+                input_rx
+                    .try_recv()
+                    .expect("horizontal wheel should reach pane"),
+                Bytes::from(format!("\x1b[<{button};3;4M"))
+            );
+        }
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn horizontal_wheel_stays_inert_for_non_mouse_reporting_pane() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"",
+                1,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+
+        let input = format!(
+            "\x1b[<66;{};{}M",
+            info.inner_rect.x + 3,
+            info.inner_rect.y + 4
+        );
+        let event = crate::raw_input::parse_raw_input_bytes_sync(input.as_bytes())
+            .pop()
+            .expect("horizontal SGR wheel input should parse");
+
+        assert!(app.handle_raw_input_event(event).await);
+
+        assert!(input_rx.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -3245,6 +3365,149 @@ mod tests {
             }
         );
         assert_eq!(app.state.mode, Mode::ContextMenu);
+    }
+
+    #[test]
+    fn clicking_tab_context_menu_close_leaves_context_menu_mode() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("one");
+        ws.test_add_tab(Some("two"));
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let second_tab = app.state.view.tab_hit_areas[1];
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            second_tab.x + 1,
+            second_tab.y,
+        ));
+
+        let menu = app
+            .state
+            .context_menu_rect()
+            .expect("tab context menu rect");
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            menu.x + 2,
+            menu.y + 3,
+        ));
+
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(app.state.workspaces[0].display_name(), "one");
+        assert!(app.state.context_menu.is_none());
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app
+            .event_hub
+            .events_after(0)
+            .iter()
+            .any(|(_, event)| { matches!(event.event, crate::api::schema::EventKind::TabClosed) }));
+    }
+
+    #[test]
+    fn clicking_pane_context_menu_close_leaves_context_menu_mode() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("one");
+        let first_pane = ws.tabs[0].root_pane;
+        let second_pane = ws.test_split(Direction::Horizontal);
+        ws.tabs[0].layout.focus_pane(second_pane);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let first_info = app
+            .state
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == first_pane)
+            .expect("first pane info")
+            .clone();
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            first_info.inner_rect.x + 1,
+            first_info.inner_rect.y + 1,
+        ));
+
+        let menu_state = app.state.context_menu.as_ref().expect("pane context menu");
+        let close_idx = menu_state
+            .items()
+            .iter()
+            .position(|item| *item == "Close pane")
+            .expect("close pane menu item");
+        let menu = app
+            .state
+            .context_menu_rect()
+            .expect("pane context menu rect");
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            menu.x + 2,
+            menu.y + 1 + close_idx as u16,
+        ));
+
+        assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
+        assert!(app.state.context_menu.is_none());
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.event_hub.events_after(0).iter().any(|(_, event)| {
+            matches!(event.event, crate::api::schema::EventKind::PaneClosed)
+        }));
+    }
+
+    #[test]
+    fn clicking_pane_context_menu_close_last_parent_group_pane_keeps_confirmation_mode() {
+        let mut app = app_for_mouse_test();
+        let mut parent = Workspace::test_new("main");
+        let pane_id = parent.tabs[0].root_pane;
+        mark_worktree_space_member(&mut parent, 0, "repo-key");
+        let mut child = Workspace::test_new("issue");
+        mark_worktree_space_member(&mut child, 1, "repo-key");
+        app.state.workspaces = vec![parent, child];
+        app.state.active = Some(0);
+        app.state.selected = 1;
+        app.state.mode = Mode::Terminal;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let pane_info = app
+            .state
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == pane_id)
+            .expect("pane info")
+            .clone();
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            pane_info.inner_rect.x + 1,
+            pane_info.inner_rect.y + 1,
+        ));
+
+        let menu_state = app.state.context_menu.as_ref().expect("pane context menu");
+        let close_idx = menu_state
+            .items()
+            .iter()
+            .position(|item| *item == "Close pane")
+            .expect("close pane menu item");
+        let menu = app
+            .state
+            .context_menu_rect()
+            .expect("pane context menu rect");
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            menu.x + 2,
+            menu.y + 1 + close_idx as u16,
+        ));
+
+        assert_eq!(app.state.selected, 0);
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert!(app.state.context_menu.is_none());
     }
 
     #[test]
