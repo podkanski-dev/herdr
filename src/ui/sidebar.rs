@@ -1185,6 +1185,17 @@ fn render_workspace_list(
             },
         );
 
+        // Resolved once per card so the accent stripe fill and the group
+        // chevron drawn on top of it agree on the color.
+        let accent_color = app.workspace_accent_color(i);
+        // The group chevron sits on column 0, on top of the accent stripe, so
+        // clicking the visible chevron toggles the group (the click target is
+        // also column 0). Keep it legible on the stripe: contrast on an accent
+        // background, else the theme accent on the plain gutter.
+        let chevron_fg = match accent_color {
+            Some(accent) => super::panes::readable_fg_on(accent, p),
+            None => p.accent,
+        };
         for (row_index, resolved) in rows.iter().enumerate() {
             if row_index as u16 >= row_height || row_y + row_index as u16 >= list_bottom {
                 break;
@@ -1198,12 +1209,11 @@ fn render_workspace_list(
                 if card.indented {
                     spans.push(Span::raw("   "));
                 } else if let Some((_, collapsed)) = parent_group.as_ref() {
-                    spans.push(Span::raw(" "));
                     spans.push(Span::styled(
                         if *collapsed { "▸" } else { "▾" },
-                        Style::default().fg(p.accent),
+                        Style::default().fg(chevron_fg),
                     ));
-                    spans.push(Span::raw(" "));
+                    spans.push(Span::raw("  "));
                 } else {
                     spans.push(Span::raw("  "));
                 }
@@ -1239,12 +1249,14 @@ fn render_workspace_list(
             );
         }
 
-        if let Some(accent) = app.workspace_accent_color(i) {
+        if let Some(accent) = accent_color {
             let buf = frame.buffer_mut();
             for y in row_y..row_y + row_height {
                 if y >= list_bottom {
                     break;
                 }
+                // Painting only the background preserves the chevron glyph and
+                // its contrasting foreground already rendered at column 0.
                 buf[(card.rect.x, y)].set_style(Style::default().bg(accent));
             }
         }
@@ -2106,6 +2118,41 @@ mod tests {
         assert_eq!(cards[1].ws_idx, 1);
         assert!(cards[1].indented);
         assert_eq!(cards[1].rect.y, cards[0].rect.y + cards[0].rect.height + 1);
+    }
+
+    #[test]
+    fn worktree_group_chevron_renders_on_accent_column_zero() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-key"), "/repo/herdr"),
+            workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
+        ];
+        // A space accent color means the chevron must remain legible while
+        // sitting on the accent stripe at column 0.
+        app.workspaces[0].accent_color = Some("blue".to_string());
+        app.mode = Mode::Terminal;
+
+        let area = Rect::new(0, 0, 30, 20);
+        let (cards, _headers) = compute_workspace_list_areas(&app, area);
+        app.view.workspace_card_areas = cards.clone();
+        let parent = cards[0].rect;
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(area.width, area.height)).expect("test terminal");
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        terminal
+            .draw(|frame| render_workspace_list(&app, &runtimes, frame, area, false))
+            .expect("workspace list should render");
+
+        let buffer = terminal.backend().buffer();
+        // The expand chevron is drawn at column 0 (the accent/click column),
+        // aligned with the click-to-toggle target, not one column to the right.
+        assert_eq!(buffer[(parent.x, parent.y)].symbol(), "▾");
+        assert_eq!(
+            buffer[(parent.x, parent.y)].style().bg,
+            Some(app.palette.blue)
+        );
+        assert_ne!(buffer[(parent.x + 1, parent.y)].symbol(), "▾");
     }
 
     #[test]

@@ -853,6 +853,13 @@ fn terminal_theme_to_rgb(color: crate::terminal_theme::RgbColor) -> Rgb {
 }
 
 fn selection_fg_for_bg(bg: Color, p: &Palette) -> Color {
+    readable_fg_on(bg, p)
+}
+
+/// Foreground color that stays legible on top of an arbitrary background:
+/// white on dark, black on light, falling back to the panel contrast color for
+/// non-RGB colors whose luminance is unknown.
+pub(crate) fn readable_fg_on(bg: Color, p: &Palette) -> Color {
     color_to_rgb(bg)
         .map(|bg| {
             if relative_luminance(bg) < 0.5 {
