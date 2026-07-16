@@ -1152,6 +1152,19 @@ pub fn workspace_color_swatches(palette: &Palette) -> Vec<(String, Color)> {
     ]
 }
 
+/// A workspace's worktree-group identity as `(group key, is_linked_worktree)`,
+/// used to link linked worktrees to their parent space for color inheritance.
+/// Prefers explicit Herdr `worktree_space` membership and falls back to cached
+/// git metadata so worktrees from sessions that predate membership still group.
+/// Returns `None` when the workspace belongs to no git repo / worktree group.
+fn workspace_group_identity(ws: &Workspace) -> Option<(&str, bool)> {
+    if let Some(space) = ws.worktree_space() {
+        return Some((space.key.as_str(), space.is_linked_worktree));
+    }
+    ws.git_space()
+        .map(|git| (git.key.as_str(), git.is_linked_worktree))
+}
+
 pub(crate) enum DragTarget {
     WorkspaceReorder {
         source_ws_idx: usize,
@@ -1631,26 +1644,30 @@ impl AppState {
     }
 
     /// For a linked worktree, the workspace that owns the group's accent color:
-    /// the parent space (`is_linked_worktree == false`) sharing the same
-    /// `worktree_space.key`. Returns `ws_idx` unchanged for non-worktree
-    /// workspaces, or when that parent space is not currently open.
+    /// the parent space (`is_linked_worktree == false`) sharing the same group
+    /// key. Returns `ws_idx` unchanged for non-worktree workspaces, or when that
+    /// parent space is not currently open.
+    ///
+    /// Group identity comes from explicit Herdr `worktree_space` membership when
+    /// present, and otherwise falls back to cached git metadata. The fallback
+    /// lets worktrees from older sessions — which predate `worktree_space`
+    /// membership — still inherit their space's color without needing to be
+    /// re-registered.
     pub(crate) fn color_source_ws_idx(&self, ws_idx: usize) -> usize {
-        let Some(space) = self
-            .workspaces
-            .get(ws_idx)
-            .and_then(|ws| ws.worktree_space())
-        else {
+        let Some(ws) = self.workspaces.get(ws_idx) else {
             return ws_idx;
         };
-        if !space.is_linked_worktree {
+        let Some((key, is_linked_worktree)) = workspace_group_identity(ws) else {
+            return ws_idx;
+        };
+        if !is_linked_worktree {
             return ws_idx;
         }
-        let key = space.key.clone();
         self.workspaces
             .iter()
-            .position(|ws| {
-                ws.worktree_space()
-                    .is_some_and(|member| !member.is_linked_worktree && member.key == key)
+            .position(|candidate| {
+                workspace_group_identity(candidate)
+                    .is_some_and(|(candidate_key, linked)| !linked && candidate_key == key)
             })
             .unwrap_or(ws_idx)
     }
@@ -2623,6 +2640,37 @@ mod tests {
         state.workspaces[0].accent_color = Some("blue".to_string());
         // A stale per-worktree color must not win over the parent space's color.
         state.workspaces[1].accent_color = Some("red".to_string());
+        assert_eq!(state.workspace_accent_color(1), Some(state.palette.blue));
+    }
+
+    #[test]
+    fn worktree_inherits_parent_space_color_via_cached_git_space() {
+        // Worktrees from sessions predating `worktree_space` membership have no
+        // explicit membership, only cached git metadata. They must still inherit.
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("space")); // idx 0: parent
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("wt")); // idx 1: worktree
+        state.workspaces[0].cached_git_space = Some(crate::workspace::GitSpaceMetadata {
+            key: "repo-key".into(),
+            checkout_key: "/repo/herdr".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            is_linked_worktree: false,
+        });
+        state.workspaces[1].cached_git_space = Some(crate::workspace::GitSpaceMetadata {
+            key: "repo-key".into(),
+            checkout_key: "/repo/herdr-wt".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr-wt".into(),
+            is_linked_worktree: true,
+        });
+        assert!(state.workspaces[0].worktree_space().is_none());
+        assert!(state.workspaces[1].worktree_space().is_none());
+        state.workspaces[0].accent_color = Some("blue".to_string());
         assert_eq!(state.workspace_accent_color(1), Some(state.palette.blue));
     }
 
