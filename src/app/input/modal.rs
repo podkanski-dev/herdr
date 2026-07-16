@@ -317,11 +317,13 @@ pub(super) fn open_choose_workspace_color(
 ) {
     use crate::app::state::{workspace_color_swatches, ColorPickerSelection, ColorPickerState};
     state.selected = ws_idx;
+    // Worktrees inherit their space's color, so edit the group's parent space.
+    let target_idx = state.color_source_ws_idx(ws_idx);
     let swatches = workspace_color_swatches(&state.palette);
 
     let current = state
         .workspaces
-        .get(ws_idx)
+        .get(target_idx)
         .and_then(|ws| ws.accent_color.clone());
     let (selected, hex_input) = match current {
         None => (ColorPickerSelection::Clear, String::new()),
@@ -335,7 +337,7 @@ pub(super) fn open_choose_workspace_color(
     };
 
     state.color_picker = Some(ColorPickerState {
-        ws_idx,
+        ws_idx: target_idx,
         swatches,
         selected,
         hex_input,
@@ -2122,6 +2124,61 @@ mod tests {
         assert!(state.session_dirty);
         assert_eq!(state.mode, Mode::Navigate);
         assert!(state.color_picker.is_none());
+    }
+
+    fn state_with_space_and_worktree_for_picker() -> AppState {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("space")); // idx 0: parent space
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("wt")); // idx 1: linked worktree
+        state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr".into(),
+            is_linked_worktree: false,
+        });
+        state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr-wt".into(),
+            is_linked_worktree: true,
+        });
+        state
+    }
+
+    #[test]
+    fn opening_color_picker_on_worktree_targets_parent_space() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = state_with_space_and_worktree_for_picker();
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        // Invoke the picker from the worktree row (index 1).
+        open_choose_workspace_color(&mut state, &runtimes, 1);
+        let picker = state.color_picker.as_ref().unwrap();
+        // Picker edits the parent space (index 0), pre-selecting its "blue" swatch.
+        assert_eq!(picker.ws_idx, 0);
+        assert_eq!(picker.selected, ColorPickerSelection::Swatch(5));
+    }
+
+    #[test]
+    fn applying_from_worktree_picker_clears_parent_space() {
+        use crate::app::state::ColorPickerSelection;
+        let mut state = state_with_space_and_worktree_for_picker();
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::default();
+        open_choose_workspace_color(&mut state, &runtimes, 1);
+        if let Some(picker) = state.color_picker.as_mut() {
+            picker.selected = ColorPickerSelection::Clear;
+        }
+        apply_workspace_color(&mut state);
+        // The parent space's color is cleared, so the worktree resolves to none.
+        assert!(state.workspaces[0].accent_color.is_none());
+        assert_eq!(state.workspace_accent_color(1), None);
     }
 
     #[test]
