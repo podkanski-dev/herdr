@@ -1200,34 +1200,27 @@ fn render_workspace_list(
             if row_index as u16 >= row_height || row_y + row_index as u16 >= list_bottom {
                 break;
             }
-            // Column 0 is reserved as the workspace accent-stripe gutter, so
-            // non-indented rows carry one extra leading space. Indented (child)
-            // rows already start with blank columns, so their prefixes are
-            // unchanged.
+            // Every first row uses a three-column prefix so the status dot
+            // lines up at column 3 regardless of kind: column 0 is the chevron
+            // gutter (a chevron for group headers, blank for leaves and
+            // children) plus two spaces. This keeps the left edge aligned
+            // across leaf spaces, group headers, and worktree children.
             let mut spans = Vec::new();
             if row_index == 0 {
-                if card.indented {
-                    spans.push(Span::raw("   "));
-                } else if let Some((_, collapsed)) = parent_group.as_ref() {
+                if let Some((_, collapsed)) = parent_group.as_ref() {
                     spans.push(Span::styled(
                         if *collapsed { "▸" } else { "▾" },
                         Style::default().fg(chevron_fg),
                     ));
                     spans.push(Span::raw("  "));
                 } else {
-                    spans.push(Span::raw("  "));
+                    spans.push(Span::raw("   "));
                 }
             } else {
                 spans.push(Span::raw(if card.indented { "     " } else { "    " }));
             }
             let prefix_width = if row_index == 0 {
-                // Child rows and group headers both use a three-column prefix
-                // (indent/arrow plus the accent-stripe gutter); leaf rows use two.
-                if card.indented || parent_group.is_some() {
-                    3
-                } else {
-                    2
-                }
+                3
             } else if card.indented {
                 5
             } else {
@@ -2118,6 +2111,43 @@ mod tests {
         assert_eq!(cards[1].ws_idx, 1);
         assert!(cards[1].indented);
         assert_eq!(cards[1].rect.y, cards[0].rect.y + cards[0].rect.height + 1);
+    }
+
+    #[test]
+    fn leaf_group_header_and_child_dots_share_a_column() {
+        let mut app = AppState::test_new();
+        let mut leaf = Workspace::test_new("crime-doodles");
+        leaf.cached_git_branch = Some("fix/scenery".into());
+        app.workspaces = vec![
+            leaf,
+            workspace_with_worktree_space("main", Some("repo-key"), "/repo/herdr"),
+            workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
+        ];
+        app.mode = Mode::Terminal;
+
+        let area = Rect::new(0, 0, 30, 20);
+        let (cards, _headers) = compute_workspace_list_areas(&app, area);
+        app.view.workspace_card_areas = cards.clone();
+        let leaf_rect = cards[0].rect; // leaf space (no worktrees)
+        let header_rect = cards[1].rect; // group header
+        let child_rect = cards[2].rect; // worktree child
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(area.width, area.height)).expect("test terminal");
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        terminal
+            .draw(|frame| render_workspace_list(&app, &runtimes, frame, area, false))
+            .expect("workspace list should render");
+        let buffer = terminal.backend().buffer();
+
+        // The status dot lines up at column 3 for a leaf space, a group header,
+        // and a worktree child — no jagged left edge between kinds.
+        for rect in [leaf_rect, header_rect, child_rect] {
+            assert_eq!(buffer[(rect.x + 2, rect.y)].symbol(), " ");
+            assert_ne!(buffer[(rect.x + 3, rect.y)].symbol(), " ");
+        }
+        // The group header still shows its chevron in the column-0 gutter.
+        assert_eq!(buffer[(header_rect.x, header_rect.y)].symbol(), "▾");
     }
 
     #[test]
