@@ -1630,6 +1630,31 @@ impl AppState {
         self.sound.enabled
     }
 
+    /// For a linked worktree, the workspace that owns the group's accent color:
+    /// the parent space (`is_linked_worktree == false`) sharing the same
+    /// `worktree_space.key`. Returns `ws_idx` unchanged for non-worktree
+    /// workspaces, or when that parent space is not currently open.
+    pub(crate) fn color_source_ws_idx(&self, ws_idx: usize) -> usize {
+        let Some(space) = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.worktree_space())
+        else {
+            return ws_idx;
+        };
+        if !space.is_linked_worktree {
+            return ws_idx;
+        }
+        let key = space.key.clone();
+        self.workspaces
+            .iter()
+            .position(|ws| {
+                ws.worktree_space()
+                    .is_some_and(|member| !member.is_linked_worktree && member.key == key)
+            })
+            .unwrap_or(ws_idx)
+    }
+
     /// Resolve a workspace's accent color using two-layer lookup:
     /// 1. Per-workspace override (`ws.accent_color`) takes precedence.
     /// 2. Directory default from config, keyed by `identity_cwd`, as fallback.
@@ -1637,8 +1662,11 @@ impl AppState {
     /// Curated swatch names (e.g. "blue", "mauve") resolve against the active
     /// palette so they stay theme-accurate and match what the picker shows.
     /// Everything else (hex like "#89b4fa", standard names) parses directly.
+    /// Linked worktrees inherit their parent space's resolved color.
     pub fn workspace_accent_color(&self, ws_idx: usize) -> Option<Color> {
-        let ws = self.workspaces.get(ws_idx)?;
+        // Linked worktrees inherit their parent space's color; the space owns it.
+        let source_idx = self.color_source_ws_idx(ws_idx);
+        let ws = self.workspaces.get(source_idx)?;
         // Layer 2: explicit per-workspace override (session state).
         // Layer 1: directory default from config, keyed by identity_cwd.
         let raw: &str = match ws.accent_color.as_deref() {
@@ -2543,6 +2571,76 @@ mod tests {
         assert_eq!(state.workspace_accent_color(0), Some(state.palette.blue));
         state.workspace_colors.insert(cwd, "mauve".to_string());
         assert_eq!(state.workspace_accent_color(0), Some(state.palette.mauve));
+    }
+
+    fn state_with_space_and_worktree() -> AppState {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("space")); // idx 0: parent space
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("wt")); // idx 1: linked worktree
+        state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr".into(),
+            is_linked_worktree: false,
+        });
+        state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr-wt".into(),
+            is_linked_worktree: true,
+        });
+        state
+    }
+
+    #[test]
+    fn worktree_inherits_parent_space_color() {
+        let mut state = state_with_space_and_worktree();
+        state.workspaces[0].accent_color = Some("mauve".to_string());
+        // Both the space and the worktree resolve to the same themed color.
+        assert_eq!(state.workspace_accent_color(0), Some(state.palette.mauve));
+        assert_eq!(state.workspace_accent_color(1), Some(state.palette.mauve));
+    }
+
+    #[test]
+    fn worktree_color_clears_with_parent_space() {
+        let mut state = state_with_space_and_worktree();
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        assert_eq!(state.workspace_accent_color(1), Some(state.palette.blue));
+        // Clearing the space clears the worktree too.
+        state.workspaces[0].accent_color = None;
+        assert_eq!(state.workspace_accent_color(1), None);
+    }
+
+    #[test]
+    fn worktree_ignores_own_stale_color() {
+        let mut state = state_with_space_and_worktree();
+        state.workspaces[0].accent_color = Some("blue".to_string());
+        // A stale per-worktree color must not win over the parent space's color.
+        state.workspaces[1].accent_color = Some("red".to_string());
+        assert_eq!(state.workspace_accent_color(1), Some(state.palette.blue));
+    }
+
+    #[test]
+    fn worktree_without_open_parent_has_no_inherited_color() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("wt"));
+        state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr-wt".into(),
+            is_linked_worktree: true,
+        });
+        // No parent space open: nothing to inherit, and no own color set.
+        assert_eq!(state.workspace_accent_color(0), None);
     }
 
     #[test]
