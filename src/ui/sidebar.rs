@@ -1200,14 +1200,16 @@ fn render_workspace_list(
             if row_index as u16 >= row_height || row_y + row_index as u16 >= list_bottom {
                 break;
             }
-            // Every first row uses a three-column prefix so the status dot
-            // lines up at column 3 regardless of kind: column 0 is the chevron
-            // gutter (a chevron for group headers, blank for leaves and
-            // children) plus two spaces. This keeps the left edge aligned
-            // across leaf spaces, group headers, and worktree children.
+            // Leaf spaces and group headers keep the status dot at column 3:
+            // column 0 is the chevron gutter (a chevron for group headers, blank
+            // for leaves) plus two spaces, so their left edge stays aligned.
+            // Worktree children indent two columns deeper (dot at column 5) so
+            // the nesting under their parent space is visible.
             let mut spans = Vec::new();
             if row_index == 0 {
-                if let Some((_, collapsed)) = parent_group.as_ref() {
+                if card.indented {
+                    spans.push(Span::raw("     "));
+                } else if let Some((_, collapsed)) = parent_group.as_ref() {
                     spans.push(Span::styled(
                         if *collapsed { "▸" } else { "▾" },
                         Style::default().fg(chevron_fg),
@@ -1220,7 +1222,11 @@ fn render_workspace_list(
                 spans.push(Span::raw(if card.indented { "     " } else { "    " }));
             }
             let prefix_width = if row_index == 0 {
-                3
+                if card.indented {
+                    5
+                } else {
+                    3
+                }
             } else if card.indented {
                 5
             } else {
@@ -2114,7 +2120,7 @@ mod tests {
     }
 
     #[test]
-    fn leaf_group_header_and_child_dots_share_a_column() {
+    fn leaf_and_group_header_dots_align_and_children_indent_deeper() {
         let mut app = AppState::test_new();
         let mut leaf = Workspace::test_new("crime-doodles");
         leaf.cached_git_branch = Some("fix/scenery".into());
@@ -2140,14 +2146,18 @@ mod tests {
             .expect("workspace list should render");
         let buffer = terminal.backend().buffer();
 
-        // The status dot lines up at column 3 for a leaf space, a group header,
-        // and a worktree child — no jagged left edge between kinds.
-        for rect in [leaf_rect, header_rect, child_rect] {
+        // Leaf spaces and group headers keep the status dot at column 3, so the
+        // top-level left edge is not jagged.
+        for rect in [leaf_rect, header_rect] {
             assert_eq!(buffer[(rect.x + 2, rect.y)].symbol(), " ");
             assert_ne!(buffer[(rect.x + 3, rect.y)].symbol(), " ");
         }
-        // The group header still shows its chevron in the column-0 gutter.
+        // The group header shows its chevron in the column-0 gutter.
         assert_eq!(buffer[(header_rect.x, header_rect.y)].symbol(), "▾");
+        // Worktree children indent two columns deeper, dot at column 5, so the
+        // nesting under the space is visible.
+        assert_eq!(buffer[(child_rect.x + 4, child_rect.y)].symbol(), " ");
+        assert_ne!(buffer[(child_rect.x + 5, child_rect.y)].symbol(), " ");
     }
 
     #[test]
