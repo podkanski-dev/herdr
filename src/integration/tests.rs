@@ -94,6 +94,7 @@ fn enforce_agent_version_accepts_current_version() {
 
 fn clear_integration_path_env() {
     std::env::remove_var(PI_CODING_AGENT_DIR_ENV_VAR);
+    std::env::remove_var(OMP_CONFIG_DIR_ENV_VAR);
     std::env::remove_var(CLAUDE_CONFIG_DIR_ENV_VAR);
     std::env::remove_var(CODEX_HOME_ENV_VAR);
     std::env::remove_var(COPILOT_HOME_ENV_VAR);
@@ -116,16 +117,23 @@ fn kimi_config_hooks(config: &str) -> Vec<toml::Value> {
         .unwrap_or_default()
 }
 
-fn assert_kimi_hook(config: &str, hook_path: &Path, event: &str, action: &str) {
+fn assert_kimi_hook(
+    config: &str,
+    hook_path: &Path,
+    event: &str,
+    matcher: Option<&str>,
+    action: &str,
+) {
     let command = kimi_hook_command(hook_path, action);
     let hooks = kimi_config_hooks(config);
     assert!(
         hooks.iter().any(|hook| {
             hook.get("event").and_then(toml::Value::as_str) == Some(event)
+                && hook.get("matcher").and_then(toml::Value::as_str) == matcher
                 && hook.get("command").and_then(toml::Value::as_str) == Some(command.as_str())
                 && hook.get("timeout").and_then(toml::Value::as_integer) == Some(10)
         }),
-        "missing kimi hook for {event} -> {action}"
+        "missing kimi hook for {event} ({matcher:?}) -> {action}"
     );
 }
 
@@ -165,21 +173,21 @@ fn home_dir_uses_userprofile_when_home_is_missing() {
 
 #[cfg(windows)]
 #[test]
-fn windows_supports_only_cli_hook_integrations() {
+fn windows_supports_portable_integrations() {
     use crate::api::schema::IntegrationTarget;
 
-    assert!(!integration_target_supported(IntegrationTarget::Pi));
-    assert!(!integration_target_supported(IntegrationTarget::Omp));
-    assert!(!integration_target_supported(IntegrationTarget::Opencode));
-    assert!(!integration_target_supported(IntegrationTarget::Kilo));
     assert!(!integration_target_supported(IntegrationTarget::Hermes));
     assert!(!integration_target_supported(IntegrationTarget::Cursor));
     assert!(!integration_target_supported(IntegrationTarget::Devin));
     assert!(!integration_target_supported(IntegrationTarget::Mastracode));
 
+    assert!(integration_target_supported(IntegrationTarget::Pi));
+    assert!(integration_target_supported(IntegrationTarget::Omp));
     assert!(integration_target_supported(IntegrationTarget::Claude));
     assert!(integration_target_supported(IntegrationTarget::Codex));
     assert!(integration_target_supported(IntegrationTarget::Copilot));
+    assert!(integration_target_supported(IntegrationTarget::Opencode));
+    assert!(integration_target_supported(IntegrationTarget::Kilo));
     assert!(integration_target_supported(IntegrationTarget::Droid));
     assert!(integration_target_supported(IntegrationTarget::Kimi));
     assert!(integration_target_supported(IntegrationTarget::Qodercli));
@@ -187,7 +195,7 @@ fn windows_supports_only_cli_hook_integrations() {
 
 #[cfg(windows)]
 #[test]
-fn windows_does_not_offer_unsupported_integrations_even_when_commands_exist() {
+fn windows_availability_excludes_unsupported_integrations() {
     use crate::api::schema::IntegrationTarget;
 
     let _lock = integration_env_lock();
@@ -206,10 +214,10 @@ fn windows_does_not_offer_unsupported_integrations_even_when_commands_exist() {
     fs::write(bin.join("devin.cmd"), "@echo off\r\n").unwrap();
     fs::write(bin.join("mastracode.cmd"), "@echo off\r\n").unwrap();
 
-    assert!(!integration_target_available(IntegrationTarget::Pi));
-    assert!(!integration_target_available(IntegrationTarget::Omp));
-    assert!(!integration_target_available(IntegrationTarget::Opencode));
-    assert!(!integration_target_available(IntegrationTarget::Kilo));
+    assert!(integration_target_available(IntegrationTarget::Pi));
+    assert!(integration_target_available(IntegrationTarget::Omp));
+    assert!(integration_target_available(IntegrationTarget::Opencode));
+    assert!(integration_target_available(IntegrationTarget::Kilo));
     assert!(!integration_target_available(IntegrationTarget::Hermes));
     assert!(!integration_target_available(IntegrationTarget::Cursor));
     assert!(!integration_target_available(IntegrationTarget::Devin));
@@ -238,10 +246,10 @@ fn windows_install_rejects_unsupported_integration_before_config_lookup() {
     std::env::remove_var("HOMEDRIVE");
     std::env::remove_var("HOMEPATH");
 
-    let err = install_target(IntegrationTarget::Pi).unwrap_err();
+    let err = install_target(IntegrationTarget::Hermes).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "pi integration is not supported on Windows"
+        "hermes integration is not supported on Windows"
     );
 
     if let Some(home) = original_home {
@@ -487,6 +495,27 @@ fn install_pi_writes_embedded_asset_to_pi_extensions_dir() {
 }
 
 #[test]
+fn install_pi_creates_extensions_dir_when_agent_dir_exists() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let agent_dir = home.join(".pi/agent");
+    fs::create_dir_all(&agent_dir).unwrap();
+    std::env::set_var("HOME", &home);
+
+    let path = install_pi().unwrap();
+
+    assert_eq!(
+        path,
+        agent_dir.join("extensions").join(PI_EXTENSION_INSTALL_NAME)
+    );
+    assert!(path.is_file());
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
 fn install_pi_uses_pi_coding_agent_dir_env() {
     let _lock = integration_env_lock();
     let base = unique_base();
@@ -597,13 +626,14 @@ fn install_omp_preserves_non_herdr_file_with_pi_install_name() {
 }
 
 #[test]
-fn install_omp_uses_pi_coding_agent_dir_env() {
+fn install_omp_uses_pi_config_dir_env() {
     let _lock = integration_env_lock();
     let base = unique_base();
-    let agent_dir = base.join("custom-omp-agent");
-    let ext_dir = agent_dir.join("extensions");
+    let home = base.join("home");
+    let ext_dir = home.join("custom-omp/agent/extensions");
     fs::create_dir_all(&ext_dir).unwrap();
-    std::env::set_var(PI_CODING_AGENT_DIR_ENV_VAR, &agent_dir);
+    std::env::set_var("HOME", &home);
+    std::env::set_var(OMP_CONFIG_DIR_ENV_VAR, "custom-omp");
 
     let installed = install_omp().unwrap();
 
@@ -612,6 +642,30 @@ fn install_omp_uses_pi_coding_agent_dir_env() {
         ext_dir.join(OMP_EXTENSION_INSTALL_NAME)
     );
     assert!(!installed.removed_legacy_pi_extension);
+
+    std::env::remove_var("HOME");
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_omp_refuses_shared_pi_extension_directory() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let agent_dir = base.join("shared-agent");
+    let ext_dir = agent_dir.join("extensions");
+    let pi_extension = ext_dir.join(PI_EXTENSION_INSTALL_NAME);
+    fs::create_dir_all(&ext_dir).unwrap();
+    fs::write(&pi_extension, PI_EXTENSION_ASSET).unwrap();
+    std::env::set_var(PI_CODING_AGENT_DIR_ENV_VAR, &agent_dir);
+    std::env::set_var(OMP_CONFIG_DIR_ENV_VAR, "ignored-omp-config");
+
+    let err = install_omp().unwrap_err().to_string();
+
+    assert!(err.contains("Pi and OMP resolve to the same extension directory"));
+    assert!(err.contains(&ext_dir.display().to_string()));
+    assert!(pi_extension.is_file());
+    assert!(!ext_dir.join(OMP_EXTENSION_INSTALL_NAME).exists());
 
     clear_integration_path_env();
     let _ = fs::remove_dir_all(base);
@@ -1476,12 +1530,32 @@ fn install_kimi_writes_hook_and_updates_config() {
     assert!(config.contains("command = \"echo keep\""));
     assert!(config.contains(KIMI_CONFIG_BLOCK_BEGIN));
     assert!(config.contains(KIMI_CONFIG_BLOCK_END));
-    for (event, action) in KIMI_HOOK_EVENTS {
-        assert_kimi_hook(&config, &installed.hook_path, event, action);
+    for (event, matcher, action) in KIMI_HOOK_EVENTS {
+        assert_kimi_hook(&config, &installed.hook_path, event, matcher, action);
     }
 
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn kimi_question_hooks_report_blocked_until_the_question_finishes() {
+    assert!(KIMI_HOOK_EVENTS.contains(&(
+        "PreToolUse",
+        Some(KIMI_ASK_USER_QUESTION_MATCHER),
+        "blocked",
+    )));
+    assert!(KIMI_HOOK_EVENTS.contains(&(
+        "PostToolUse",
+        Some(KIMI_ASK_USER_QUESTION_MATCHER),
+        "working",
+    )));
+    assert!(KIMI_HOOK_EVENTS.contains(&(
+        "PostToolUseFailure",
+        Some(KIMI_ASK_USER_QUESTION_MATCHER),
+        "working",
+    )));
+    assert!(KIMI_HOOK_EVENTS.contains(&("PreToolUse", Some(KIMI_OTHER_TOOL_MATCHER), "working",)));
 }
 
 #[test]
@@ -2655,9 +2729,8 @@ fn bundled_integration_assets_report_session_refs() {
     assert!(PI_EXTENSION_ASSET.contains("pane.report_agent_session"));
     assert!(PI_EXTENSION_ASSET.contains("pane.report_agent\""));
     assert!(PI_EXTENSION_ASSET.contains("pi.on(\"agent_start\""));
-    assert!(PI_EXTENSION_ASSET.contains("pi.on(\"agent_end\""));
-    assert!(PI_EXTENSION_ASSET.contains("pane.release_agent"));
-    assert!(PI_EXTENSION_ASSET.contains("pi.on(\"session_shutdown\""));
+    assert!(PI_EXTENSION_ASSET.contains("pi.on(\"agent_settled\""));
+    assert!(!PI_EXTENSION_ASSET.contains("pi.on(\"session_shutdown\""));
     assert!(OMP_EXTENSION_ASSET.contains("agent_session_path"));
     assert!(OMP_EXTENSION_ASSET.contains("agent_session_id"));
     assert!(OMP_EXTENSION_ASSET.contains("ctx?.hasUI !== true"));
@@ -2665,7 +2738,6 @@ fn bundled_integration_assets_report_session_refs() {
     assert!(OMP_EXTENSION_ASSET.contains("pane.report_agent\""));
     assert!(OMP_EXTENSION_ASSET.contains("pi.on(\"agent_start\""));
     assert!(OMP_EXTENSION_ASSET.contains("pi.on(\"agent_end\""));
-    assert!(OMP_EXTENSION_ASSET.contains("pane.release_agent"));
     assert!(OMP_EXTENSION_ASSET.contains("pi.on(\"session_shutdown\""));
     assert!(
         CLAUDE_HOOK_ASSET.contains("agent_session_id")
@@ -2704,10 +2776,12 @@ fn bundled_integration_assets_report_session_refs() {
     );
     assert!(!CODEX_HOOK_ASSET.contains("\"state\": action"));
     assert!(!CODEX_HOOK_ASSET.contains("pane.release_agent"));
-    assert!(KIMI_HOOK_ASSET.contains("source = \"herdr:kimi\""));
+    assert!(KIMI_HOOK_ASSET.contains("source\": \"herdr:kimi"));
     assert!(KIMI_HOOK_ASSET.contains("agent_session_id"));
-    assert!(KIMI_HOOK_ASSET.contains("pane.report_agent_session"));
-    assert!(KIMI_HOOK_ASSET.contains("\"state\": action"));
+    assert!(KIMI_HOOK_ASSET.contains("method = \"pane.report_agent_session\""));
+    assert!(KIMI_HOOK_ASSET.contains("params[\"session_start_source\"] = \"startup\""));
+    assert!(KIMI_HOOK_ASSET.contains("method = \"pane.report_agent\""));
+    assert!(KIMI_HOOK_ASSET.contains("params[\"state\"] = action"));
     assert!(!KIMI_HOOK_ASSET.contains("pane.release_agent"));
     assert!(COPILOT_HOOK_ASSET.contains("agent_session_id"));
     assert!(COPILOT_HOOK_ASSET.contains("pane.report_agent_session"));
@@ -2731,20 +2805,23 @@ fn bundled_integration_assets_report_session_refs() {
     assert!(KILO_PLUGIN_ASSET.contains("SOURCE = \"herdr:kilo\""));
     assert!(KILO_PLUGIN_ASSET.contains("AGENT = \"kilo\""));
     assert!(KILO_PLUGIN_ASSET.contains("pane.report_agent_session"));
+    assert!(KILO_PLUGIN_ASSET.contains("session_start_source: \"startup\""));
     assert!(KILO_PLUGIN_ASSET.contains("reportState"));
     assert!(!KILO_PLUGIN_ASSET.contains("pane.release_agent"));
     assert!(HERMES_PLUGIN_INIT_ASSET.contains("session_id = _session_id(kwargs)"));
     assert!(HERMES_PLUGIN_INIT_ASSET.contains("agent_session_id"));
+    assert!(HERMES_PLUGIN_INIT_ASSET.contains("pane.report_agent_session\","));
+    assert!(HERMES_PLUGIN_INIT_ASSET.contains("\"session_start_source\": \"startup\""));
     assert!(HERMES_PLUGIN_INIT_ASSET.contains("pane.report_agent\","));
     assert!(HERMES_PLUGIN_INIT_ASSET.contains("on_session_end"));
     assert!(!HERMES_PLUGIN_INIT_ASSET.contains("on_session_finalize"));
     assert!(!HERMES_PLUGIN_INIT_ASSET.contains("pane.release_agent"));
-    assert!(QODERCLI_HOOK_ASSET.contains("HERDR_HOOK_INPUT_FILE"));
-    assert!(QODERCLI_HOOK_ASSET.contains("agent_session_id"));
-    assert!(QODERCLI_HOOK_ASSET.contains("pane.report_agent_session"));
-    assert!(!QODERCLI_HOOK_ASSET.contains("\"state\": action"));
-    assert!(!QODERCLI_HOOK_ASSET.contains("pane.release_agent"));
-    assert!(!QODERCLI_HOOK_ASSET.contains("QODER_HOOK_EVENT"));
+    assert!(QODERCLI_HOOK_ASSET.contains("HERDR_PANE_ID"));
+    assert!(QODERCLI_HOOK_ASSET.contains("session_id"));
+    assert!(QODERCLI_HOOK_ASSET.contains("report-agent-session"));
+    assert!(QODERCLI_HOOK_ASSET.contains("--agent-session-id"));
+    assert!(!QODERCLI_HOOK_ASSET.contains("report-agent\""));
+    assert!(!QODERCLI_HOOK_ASSET.contains("release-agent"));
     assert!(CURSOR_HOOK_ASSET.contains("HERDR_INTEGRATION_ID=cursor"));
     assert!(CURSOR_HOOK_ASSET.contains("conversation_id"));
     assert!(CURSOR_HOOK_ASSET.contains("conversationId"));
@@ -2756,33 +2833,30 @@ fn bundled_integration_assets_report_session_refs() {
     assert!(!CURSOR_HOOK_ASSET.contains("\"state\":"));
     assert!(!CURSOR_HOOK_ASSET.contains("pane.release_agent"));
     assert!(MASTRACODE_HOOK_ASSET.contains("HERDR_INTEGRATION_ID=mastracode"));
-    assert!(MASTRACODE_HOOK_ASSET.contains("HERDR_INTEGRATION_VERSION=1"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("HERDR_INTEGRATION_VERSION=2"));
     assert!(MASTRACODE_HOOK_ASSET.contains("session_id"));
     assert!(!MASTRACODE_HOOK_ASSET.contains("run_id"));
     assert!(MASTRACODE_HOOK_ASSET.contains("agent_session_id"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("pane.report_agent_session"));
+    assert!(MASTRACODE_HOOK_ASSET.contains("session_start_source"));
     assert!(MASTRACODE_HOOK_ASSET.contains("pane.report_agent"));
-    assert!(MASTRACODE_HOOK_ASSET.contains("pane.release_agent"));
 }
 
 #[test]
-fn pi_extension_releases_only_for_quit_session_shutdown() {
-    let release_policy = PI_EXTENSION_ASSET
-        .find("function shouldReleaseOnSessionShutdown")
-        .expect("pi extension should centralize session shutdown release policy");
-    let quit_check = PI_EXTENSION_ASSET
-        .find("reason === \"quit\"")
-        .expect("pi extension should release only for true quit shutdowns");
-    let shutdown_handler = PI_EXTENSION_ASSET
-        .find("pi.on(\"session_shutdown\", async (event)")
-        .expect("pi extension should inspect the session_shutdown event");
-    let guarded_release = PI_EXTENSION_ASSET[shutdown_handler..]
-        .find("if (shouldReleaseOnSessionShutdown(event))")
-        .expect("pi extension should guard releaseAgent by shutdown reason");
-
-    assert!(release_policy < shutdown_handler);
-    assert!(release_policy < quit_check);
-    assert!(quit_check < shutdown_handler);
-    assert!(guarded_release > 0);
+fn process_owned_integration_assets_do_not_report_release() {
+    for (name, asset) in [
+        ("pi", PI_EXTENSION_ASSET),
+        ("omp", OMP_EXTENSION_ASSET),
+        ("mastracode", MASTRACODE_HOOK_ASSET),
+        ("kimi", KIMI_HOOK_ASSET),
+        ("kilo", KILO_PLUGIN_ASSET),
+        ("hermes", HERMES_PLUGIN_INIT_ASSET),
+    ] {
+        assert!(
+            !asset.contains("pane.release_agent"),
+            "{name} process exit should own lifecycle release"
+        );
+    }
 }
 
 #[test]
@@ -2803,27 +2877,6 @@ fn pi_extension_refreshes_session_ref_before_agent_start_state() {
 
     assert!(update_session < report_session);
     assert!(report_session < publish_state);
-}
-
-#[test]
-fn omp_extension_releases_only_for_quit_session_shutdown() {
-    let release_policy = OMP_EXTENSION_ASSET
-        .find("function shouldReleaseOnSessionShutdown")
-        .expect("omp extension should centralize session shutdown release policy");
-    let quit_check = OMP_EXTENSION_ASSET
-        .find("reason === \"quit\"")
-        .expect("omp extension should release only for true quit shutdowns");
-    let shutdown_handler = OMP_EXTENSION_ASSET
-        .find("pi.on(\"session_shutdown\", async (event)")
-        .expect("omp extension should inspect the session_shutdown event");
-    let guarded_release = OMP_EXTENSION_ASSET[shutdown_handler..]
-        .find("if (shouldReleaseOnSessionShutdown(event))")
-        .expect("omp extension should guard releaseAgent by shutdown reason");
-
-    assert!(release_policy < shutdown_handler);
-    assert!(release_policy < quit_check);
-    assert!(quit_check < shutdown_handler);
-    assert!(guarded_release > 0);
 }
 
 #[test]
@@ -3332,6 +3385,57 @@ fn install_mastracode_writes_hook_and_updates_hooks_json() {
             .and_then(Value::as_str),
         Some("echo keep-me")
     );
+
+    if let Some(home) = original_home {
+        std::env::set_var("HOME", home);
+    } else {
+        std::env::remove_var("HOME");
+    }
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_mastracode_removes_v1_lifecycle_hooks() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let original_home = std::env::var_os("HOME");
+    let mastracode_dir = base.join(".mastracode");
+    let hook_path = mastracode_dir
+        .join("hooks")
+        .join(MASTRACODE_HOOK_INSTALL_NAME);
+    fs::create_dir_all(&mastracode_dir).unwrap();
+    fs::write(
+        mastracode_dir.join("hooks.json"),
+        serde_json::to_string(&json!({
+            "SessionStart": [{
+                "type": "command",
+                "command": format!("bash '{}' idle", hook_path.display()),
+                "timeout": MASTRACODE_HOOK_TIMEOUT_MS
+            }],
+            "SessionEnd": [{
+                "type": "command",
+                "command": format!("bash '{}' release", hook_path.display()),
+                "timeout": MASTRACODE_HOOK_TIMEOUT_MS
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::env::set_var("HOME", &base);
+
+    install_mastracode().unwrap();
+
+    let hooks_file: Value =
+        serde_json::from_str(&fs::read_to_string(mastracode_dir.join("hooks.json")).unwrap())
+            .unwrap();
+    let hooks = hooks_file.as_object().unwrap();
+    assert!(!hooks.contains_key("SessionEnd"));
+    let session_start = hooks["SessionStart"].as_array().unwrap();
+    assert_eq!(session_start.len(), 1);
+    assert!(session_start[0]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with("session"));
 
     if let Some(home) = original_home {
         std::env::set_var("HOME", home);

@@ -40,20 +40,29 @@ use super::{
     HERMES_PLUGIN_INIT_INSTALL_NAME, HERMES_PLUGIN_MANIFEST_ASSET,
     HERMES_PLUGIN_MANIFEST_INSTALL_NAME, KILO_PLUGIN_ASSET, KILO_PLUGIN_INSTALL_NAME,
     KIMI_HOOK_ASSET, KIMI_HOOK_INSTALL_NAME, MASTRACODE_HOOK_ASSET, MASTRACODE_HOOK_EVENTS,
-    MASTRACODE_HOOK_INSTALL_NAME, MASTRACODE_HOOK_TIMEOUT_MS, OMP_EXTENSION_ASSET,
-    OMP_EXTENSION_INSTALL_NAME, OPENCODE_PLUGIN_ASSET, OPENCODE_PLUGIN_INSTALL_NAME,
-    PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME, QODERCLI_HOOK_ASSET, QODERCLI_HOOK_EVENTS,
-    QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS,
+    MASTRACODE_HOOK_INSTALL_NAME, MASTRACODE_HOOK_TIMEOUT_MS, MASTRACODE_REMOVED_HOOK_EVENTS,
+    OMP_EXTENSION_ASSET, OMP_EXTENSION_INSTALL_NAME, OPENCODE_PLUGIN_ASSET,
+    OPENCODE_PLUGIN_INSTALL_NAME, PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME,
+    QODERCLI_HOOK_ASSET, QODERCLI_HOOK_EVENTS, QODERCLI_HOOK_INSTALL_NAME,
+    QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS,
 };
+
+fn ensure_extension_dir(dir: &Path, agent: &str) -> io::Result<()> {
+    if dir.is_dir() {
+        return Ok(());
+    }
+    if dir.parent().is_some_and(|parent| parent.is_dir()) {
+        return fs::create_dir_all(dir);
+    }
+    Err(io::Error::other(format!(
+        "{agent} extension directory not found at {}. install {agent} first",
+        dir.display()
+    )))
+}
 
 pub(crate) fn install_pi() -> io::Result<PathBuf> {
     let dir = pi_extension_dir()?;
-    if !dir.is_dir() {
-        return Err(io::Error::other(format!(
-            "pi extension directory not found at {}. install pi and create the extensions directory first",
-            dir.display()
-        )));
-    }
+    ensure_extension_dir(&dir, "pi")?;
 
     let path = dir.join(PI_EXTENSION_INSTALL_NAME);
     fs::write(&path, PI_EXTENSION_ASSET)?;
@@ -62,23 +71,14 @@ pub(crate) fn install_pi() -> io::Result<PathBuf> {
 
 pub(crate) fn install_omp() -> io::Result<OmpInstallPaths> {
     let dir = omp_extension_dir()?;
-    if !dir.is_dir() {
-        if dir.parent().is_some_and(|parent| parent.is_dir()) {
-            fs::create_dir_all(&dir)?;
-        } else {
-            return Err(io::Error::other(format!(
-                "omp extension directory not found at {}. install omp and create the extensions directory first",
-                dir.display()
-            )));
-        }
-    }
-
-    if !dir.is_dir() {
+    let pi_dir = pi_extension_dir()?;
+    if dir == pi_dir {
         return Err(io::Error::other(format!(
-            "omp extension directory not found at {}. install omp and create the extensions directory first",
+            "Pi and OMP resolve to the same extension directory at {}; configure separate agent directories before installing OMP",
             dir.display()
         )));
     }
+    ensure_extension_dir(&dir, "omp")?;
 
     let removed_legacy_pi_extension = remove_legacy_pi_extension_from_omp_dir(&dir)?;
     let extension_path = dir.join(OMP_EXTENSION_INSTALL_NAME);
@@ -1205,6 +1205,9 @@ pub(crate) fn install_mastracode() -> io::Result<MastracodeInstallPaths> {
     })?;
 
     let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
+    for (event, action) in MASTRACODE_REMOVED_HOOK_EVENTS {
+        remove_flat_command_hook(hooks, event, &format!("bash {quoted_hook_path} {action}"))?;
+    }
     for (event, action) in MASTRACODE_HOOK_EVENTS {
         ensure_flat_command_hook(
             hooks,
@@ -1243,7 +1246,10 @@ pub(crate) fn uninstall_mastracode() -> io::Result<MastracodeUninstallResult> {
         })?;
 
         let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-        for (event, action) in MASTRACODE_HOOK_EVENTS {
+        for (event, action) in MASTRACODE_HOOK_EVENTS
+            .into_iter()
+            .chain(MASTRACODE_REMOVED_HOOK_EVENTS)
+        {
             updated_hooks |= remove_flat_command_hook(
                 hooks,
                 event,
